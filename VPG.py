@@ -14,7 +14,6 @@ import numpy as np
 # obs, rew, done = env.step(action) -
 # add (obs, rew, done) to buffer lists -
 # when buffer is full execute VPG update: -
-# update V by MSE loss on returns
 
 class VPG_Agent(nn.Module):
     def __init__(self, obs_dim, act_dim, hidden_dim):
