@@ -15,7 +15,7 @@ class DDQN_Agent(nn.Module):
         self.hidden_size = hidden_size
         self.QNetwork = nn.Sequential(
             nn.Linear(self.obs_shape, self.hidden_size),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(self.hidden_size, self.action_shape)
         )
         self.QTarget = self.QNetwork
@@ -29,6 +29,7 @@ class DDQN_Agent(nn.Module):
         self.batch_rews = []
         self.batch_dones = []
         self.batch_next_obs = []
+        self.batch_len = 128
         self.epsilon = 0.9
         self.eps_end = 0.05
         self.eps_start = 0.9
@@ -42,9 +43,10 @@ class DDQN_Agent(nn.Module):
         if random.random() < self.epsilon:
             action = np.random.choice(self.action_shape)
         else:
-            obs_tensor = torch.from_numpy(np.array(obs))
-            logits = self.QNetwork(obs_tensor)
-            action = torch.argmax(logits).detach().item()
+            with torch.no_grad():
+                obs_tensor = torch.from_numpy(np.array(obs))
+                logits = self.QNetwork(obs_tensor)
+                action = torch.argmax(logits).item()
         self.epsilon_decay(t)
         return action
 
@@ -56,11 +58,19 @@ class DDQN_Agent(nn.Module):
         self.batch_next_obs = []
 
     def get_buffer_data(self):
-        batch_obs = torch.tensor(np.array(self.batch_obs)).detach()
-        batch_acts = torch.tensor(np.array(self.batch_acts)).detach()
-        batch_rews = torch.tensor(np.array(self.batch_rews)).detach()
-        batch_dones = torch.tensor(np.array(self.batch_dones)).detach()
-        batch_next_obs = torch.tensor(np.array(self.batch_next_obs)).detach()
+        buffer_len = len(self.batch_obs)
+        s = self.batch_len
+        batch_indicies = [random.randint(0, buffer_len-1) for _ in range(s)]
+        batch_obs = [self.batch_obs[i] for i in batch_indicies]
+        batch_acts = [self.batch_acts[i] for i in batch_indicies]
+        batch_rews = [self.batch_rews[i] for i in batch_indicies]
+        batch_dones = [self.batch_dones[i] for i in batch_indicies]
+        batch_next_obs = [self.batch_next_obs[i] for i in batch_indicies]
+        batch_obs = torch.tensor(np.array(batch_obs)).detach()
+        batch_acts = torch.tensor(np.array(batch_acts)).detach()
+        batch_rews = torch.tensor(np.array(batch_rews)).detach()
+        batch_dones = torch.tensor(np.array(batch_dones)).detach()
+        batch_next_obs = torch.tensor(np.array(batch_next_obs)).detach()
         return batch_obs, batch_acts, batch_rews, batch_dones, batch_next_obs
 
     def update(self):
@@ -71,11 +81,6 @@ class DDQN_Agent(nn.Module):
         Qsa = self.QNetwork(batch_obs)
         Qvals = torch.gather(Qsa, 1, batch_acts.unsqueeze(dim=1)).squeeze() # (x,2)[x] --> (x)
         QLoss = self.MseLoss(TD_target, Qvals)
-        #print(f"Qs: {Qs}")
-        #print(batch_acts.unsqueeze(dim=1))
-        #print(torch.gather(Qs, 0, batch_acts.unsqueeze(dim=1)))
-        #print(Qvals)
-        #print(QLoss)
 
         self.optimizer.zero_grad()
         QLoss.mean().backward()
@@ -95,7 +100,6 @@ def train(env_id="CartPole-v1", hidden_size=32):
     total_timesteps = 0
     for episode in range(num_episodes):
         obs = env.reset()[0]
-        agent.batch_obs.append(obs)
         done, trunc = False, False
         t = 0
         while not (done or trunc):
@@ -103,17 +107,17 @@ def train(env_id="CartPole-v1", hidden_size=32):
             new_obs, rew, done, trunc, _ = env.step(action)
             t += 1
             total_timesteps += 1
-            agent.batch_obs.append(new_obs)
+            agent.batch_obs.append(obs)
             agent.batch_acts.append(action)
             agent.batch_rews.append(rew)
             agent.batch_dones.append(done)
             agent.batch_next_obs.append(new_obs)
-        agent.batch_obs.pop()
-        ep_rew = sum(agent.batch_rews)
+            obs = new_obs
+        ep_rew = sum(agent.batch_rews[-t:])
         total_rews_by_ep.append(ep_rew)
-        Qloss = agent.update()
-        agent.empty_buffer()
-        print(f"| Episode {episode:<3} done | Total timesteps: {total_timesteps:<5} | Len: {t:<3} | Rewards: {ep_rew:<4.1f} | Q-Loss: {Qloss:<4.1f} |")
+        if len(agent.batch_obs) >= agent.batch_len:
+            Qloss = agent.update()
+            print(f"| Episode {episode:<3} done | Total timesteps: {total_timesteps:<5} | Len: {t:<3} | Rewards: {ep_rew:<4.1f} | Q-Loss: {Qloss:<4.1f} |")
 
     return total_rews_by_ep
 
