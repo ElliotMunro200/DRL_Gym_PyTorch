@@ -95,7 +95,7 @@ def train(env_id="CartPole-v1", hidden_size=32):
     env = gym.make(env_id)
     agent = DDQN_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size)
     # Training loop over episodes and timesteps
-    num_episodes = 1000
+    num_episodes = 200
     total_rews_by_ep = []
     total_timesteps = 0
     for episode in range(num_episodes):
@@ -113,11 +113,12 @@ def train(env_id="CartPole-v1", hidden_size=32):
             agent.batch_dones.append(done)
             agent.batch_next_obs.append(new_obs)
             obs = new_obs
+            if len(agent.batch_obs) >= agent.batch_len:
+                Qloss = agent.update()
+                if t % 100 == 0:
+                    print(f"| Episode {episode:<3} done | Total timesteps: {total_timesteps:<5} | Len: {t:<3} | Rewards: {ep_rew:<4.1f} | Q-Loss: {Qloss:<4.1f} |")
         ep_rew = sum(agent.batch_rews[-t:])
         total_rews_by_ep.append(ep_rew)
-        if len(agent.batch_obs) >= agent.batch_len:
-            Qloss = agent.update()
-            print(f"| Episode {episode:<3} done | Total timesteps: {total_timesteps:<5} | Len: {t:<3} | Rewards: {ep_rew:<4.1f} | Q-Loss: {Qloss:<4.1f} |")
 
     return total_rews_by_ep
 
@@ -125,12 +126,16 @@ def train(env_id="CartPole-v1", hidden_size=32):
 def plot(rews):
     import matplotlib.pyplot as plt
     plt.plot(rews)
-    plt.title("CartPole-v1, DQN, hidden_size=32, episodes=1000")
+    plt.title("CartPole-v1, DDQN, hidden_size=32, episodes=200")
     plt.ylabel("Total Rewards")
     plt.xlabel("Episode")
     plt.show()
 
 
 if __name__ == "__main__":
+    import time
+    start_time = time.time()
     ep_rews = train()
+    end_time = time.time()
+    print(f"END_TIME: {end_time - start_time}")
     plot(ep_rews)

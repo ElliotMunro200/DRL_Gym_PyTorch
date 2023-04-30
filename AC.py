@@ -75,7 +75,7 @@ def train(env_name="CartPole-v1", hidden_size=32):
     env = gym.make(env_name)
     agent = ActorCritic_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size)
     # Make training loops over episodes and timesteps
-    num_episodes = 200
+    num_episodes = 300
     total_rews_by_ep = []
     for episode in range(num_episodes):
         obs = env.reset()[0]
@@ -106,12 +106,16 @@ def train(env_name="CartPole-v1", hidden_size=32):
 def plot(rews):
     import matplotlib.pyplot as plt
     plt.plot(rews)
-    plt.title("CartPole-v1, AC, hidden_size=32, episodes=100")
+    plt.title("CartPole-v1, AC, hidden_size=32, episodes=300")
     plt.ylabel("Total Rewards")
     plt.xlabel("Episode")
     plt.show()
 
 
 if __name__ == "__main__":
+    import time
+    start_time = time.time()
     total_rews_by_ep = train()
+    end_time = time.time()
+    print(f"END_TIME: {end_time - start_time}")
     plot(total_rews_by_ep)

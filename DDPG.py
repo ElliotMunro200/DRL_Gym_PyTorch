@@ -134,7 +134,7 @@ class DDPG_Agent(nn.Module):
 def train(env_id="Pendulum-v1", hidden_size=64):
     env = gym.make(env_id)
     agent = DDPG_Agent(env.observation_space.shape[0], env.action_space.shape[0], hidden_size, env.action_space.high[0])
-    num_episodes = 500
+    num_episodes = 200
     total_rews_by_ep = []
     for episode in range(num_episodes):
         obs, done, trunc, t = env.reset()[0], False, False, 0
@@ -164,11 +164,15 @@ def train(env_id="Pendulum-v1", hidden_size=64):
 def plot(ep_rews):
     import matplotlib.pyplot as plt
     plt.plot(ep_rews)
-    plt.title("Pendulum-v1, DDPG, hidden_size=32, episodes=1000")
+    plt.title("Pendulum-v1, DDPG, hidden_size=64, episodes=500")
     plt.ylabel("Total Rewards")
     plt.xlabel("Episode")
     plt.show()
 
 if __name__ == "__main__":
+    import time
+    start_time = time.time()
     ep_rews = train()
+    end_time = time.time()
+    print(f"END_TIME: {end_time - start_time}")
     plot(ep_rews)

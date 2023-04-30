@@ -117,12 +117,16 @@ def train(env_name='CartPole-v1', hidden_size=32):
 def plot(ep_rews):
     import matplotlib.pyplot as plt
     plt.plot(ep_rews)
-    plt.title(f"CartPole-v1, PPO, hidden_dim=32, episodes=50")
+    plt.title(f"CartPole-v1, PPO, hidden_dim=32, episodes=500")
     plt.xlabel("Episode")
     plt.ylabel("Total rewards")
     plt.show()
 
 
 if __name__ == '__main__':
+    import time
+    start_time = time.time()
     ep_rews = train()
+    end_time = time.time()
+    print(f"END_TIME: {end_time-start_time}")
     plot(ep_rews)

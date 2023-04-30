@@ -59,7 +59,7 @@ def plot(all_episode_rews):
     plt.plot(all_episode_rews)
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
-    plt.title(f"CartPole-v1, VPG, hidden_dim=32, epochs=100, batch_size=1000")
+    plt.title(f"CartPole-v1, VPG, hidden_dim=32, epochs=50, batch_size=2000")
     plt.show()
 
 def rewards_to_go(ep_rews):
@@ -69,6 +69,8 @@ def rewards_to_go(ep_rews):
     return ep_rews_to_go
 
 if __name__ == "__main__":
+    import time
+    start_time = time.time()
     env = gym.make('CartPole-v1')
     print(f"env.action_space: {env.action_space}")
     print(f"env.observation_space: {env.observation_space}")
@@ -112,4 +114,6 @@ if __name__ == "__main__":
                 t = 0
                 ep_rews = []
     print(f"Average episode length was: {sum(all_episode_lens)/len(all_episode_lens):.1f}")
+    end_time = time.time()
+    print(f"END_TIME: {end_time - start_time}")
     plot(all_episode_rews)
