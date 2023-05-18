@@ -110,7 +110,7 @@ def train(env_name='CartPole-v1', hidden_size=32):
         total_ep_rews = sum(episode_rewards)
         training_rewards_by_episode.append(total_ep_rews)
         loss_mean, values_mean = agent.update()
-        print(f"| Trained Episode {ep} | Rewards: {total_ep_rews:<5}| Ep Len: {t:<3}| Loss: {loss_mean:<5.1f}| Value: {values_mean:.1f} |")
+        print(f"| Trained Episode {ep} | Rewards: {total_ep_rews:<5} | Ep Len: {t:<3} | Loss: {loss_mean:<5.1f} | Value: {values_mean:.1f} |")
     return training_rewards_by_episode
 
 
