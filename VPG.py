@@ -2,8 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
+from torch.distributions.normal import Normal
 import torch.optim as optim
 import gym
+from gym.spaces import Box, Discrete
 import numpy as np
 
 # repeat for number of updates:
@@ -20,30 +22,42 @@ class VPG_Agent(nn.Module):
         super(VPG_Agent, self).__init__()
         self.obs_dim = obs_dim
         self.action_space = action_space
-        self.act_dim = self.action_space.n
+        if isinstance(self.action_space, Discrete):
+            self.act_dim = self.action_space.n
+        elif isinstance(self.action_space, Box):
+            self.act_dim = self.action_space.shape[0]
         self.hidden_dim = hidden_dim
         self.fc1 = nn.Linear(self.obs_dim, self.hidden_dim)
         self.fc2 = nn.Linear(self.hidden_dim, self.act_dim)
-        self.logits_net = nn.Sequential(
+        self.pi_net = nn.Sequential(
             nn.Linear(self.obs_dim, self.hidden_dim),
             nn.Tanh(),
             nn.Linear(self.hidden_dim, self.act_dim)
         )
-        self.optimizer = optim.Adam(self.logits_net.parameters(), lr=1e-2)
+        self.optimizer = optim.Adam(self.pi_net.parameters(), lr=1e-2)
 
     def get_policy(self, obs):
         obs = obs.to(torch.float32)
-        logits = self.logits_net(obs)
-        policy = Categorical(logits=logits)
+        logits = self.pi_net(obs)
+        if isinstance(self.action_space, Discrete):
+            policy = Categorical(logits=logits)
+        elif isinstance(self.action_space, Box):
+            policy = Normal(logits, 1)
         return policy
 
     def action_select(self, obs):
         obs = torch.tensor(obs)
-        action = self.get_policy(obs).sample().item()
+        if isinstance(self.action_space, Discrete):
+            action = self.get_policy(obs).sample().item()
+        elif isinstance(self.action_space, Box):
+            action = self.get_policy(obs).sample().numpy()
         return action
 
     def loss(self, batch_obs, batch_acts, batch_rets):
-        logp = self.get_policy(batch_obs).log_prob(batch_acts)
+        if isinstance(self.action_space, Discrete):
+            logp = self.get_policy(batch_obs).log_prob(batch_acts)
+        elif isinstance(self.action_space, Box):
+            logp = self.get_policy(batch_obs).log_prob(batch_acts).sum(axis=-1)
         batch_rets = batch_rets.to(torch.float32)
         return -(logp * batch_rets).mean()
 
@@ -55,6 +69,7 @@ class VPG_Agent(nn.Module):
         batch_loss = self.loss(batch_obs, batch_acts, batch_rets)
         batch_loss.backward()
         self.optimizer.step()
+        return batch_loss
 
 def plot(run_name, all_episode_rews):
     import matplotlib.pyplot as plt
@@ -85,7 +100,9 @@ def get_args():
     parser.add_argument('--wandb', action='store_true', default=False, help='enables WandB experiment tracking')
     parser.add_argument('--wandb_project_name', type=str, default="DRL_Gym_PyTorch", help="the WandB's project name")
     parser.add_argument('--wandb_entity', type=str, default=None, help="the entity (team) of WandB's project")
-    parser.add_argument('--wandb_resume', type=str, default="auto", help="Resume setting. auto, auto-resume without id given; allow, requires give previous run id or starts a new run; must, requires id and crashes if not the same as a previous run, ensuring resuming.")
+    parser.add_argument('--wandb_resume', type=str, default="allow", help="Resume setting. auto, auto-resume without id given; allow, requires give previous run id or starts a new run; must, requires id and crashes if not the same as a previous run, ensuring resuming.")
+    parser.add_argument('--wandb_id', type=str, default="new", help="use WandB auto id generation or user-provided id.")
+    parser.add_argument('--checkpoint_model_file', type=str, default="model_checkpoint.pt", help="where to locally save checkpoint tarball")
     args = parser.parse_args()
     args.cuda = args.cuda and torch.cuda.is_available()
     return args
@@ -95,7 +112,10 @@ def printing(args, env):
     print(f"env.observation_space: {env.observation_space}")
     print(f"env.observation_space.high: {env.observation_space.high}")
     print(f"env.observation_space.low: {env.observation_space.low}")
-    print(f"env.action_space.n: {env.action_space.n}")
+    if isinstance(env.action_space, Discrete):
+        print(f"env Discrete shape: {env.action_space.n}")
+    if isinstance(env.action_space, Box):
+        print(f"env Box shape: {env.action_space.shape[0]}")
     print(f"env.observation_space.shape[0]: {env.observation_space.shape[0]}")
     print(f"env._max_episode_steps: {env._max_episode_steps}")
     run_name = f"{args.env_id}, {args.algo}, hidden_size={args.hidden_size}, num_batches={args.num_batches}, batch_size={args.batch_size}"
@@ -103,28 +123,46 @@ def printing(args, env):
     return run_name
 
 def wandb_init(args):
-    wandb.init(
+    if args.wandb_id == "new":
+        args.wandb_id = wandb.util.generate_id()
+    run = wandb.init(
         project=args.wandb_project_name,
         entity=args.wandb_entity,
         group=args.algo,
         resume=args.wandb_resume,
+        id=args.wandb_id,
         sync_tensorboard=True,
         config=vars(args),
         monitor_gym=True,
         save_code=True,
     )
-
+    return run
 def train(env, agent, args):
 
     all_episode_lens = []
     all_episode_rews = []
-    for i_batch in range(args.num_batches):
+    i_batch = 0
+    # checking if wandb ID is the same as a previous run --> resumes training
+    if args.wandb:
+        if wandb.run.resumed:
+            f = wandb.restore(args.checkpoint_model_file)
+            print(f)
+            print(type(f))
+            checkpoint = torch.load(f, encoding='cp1252')
+            agent.pi_net.load_state_dict(checkpoint['model_state_dict'])
+            agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            i_batch = checkpoint['epoch']
+            loss = checkpoint['loss']
+
+    # looping of batches/epochs (size = n * episode_size, for chosen n)
+    while i_batch < args.num_batches:
         batch_obs = []
         batch_acts = []
         batch_rews = []
         observation = env.reset(seed=args.seed)[0]
         t = 0
         ep_rews = []
+        # continue to loop in the epoch until buffer is sufficiently filled, then train, and empty buffer for new epoch.
         while True:
             # env.render()
             batch_obs.append(observation.copy())
@@ -142,10 +180,21 @@ def train(env, agent, args):
                     wandb.log({"episodic reward": total_episode_reward, "episode number": ep_num})
                 ep_rews_to_go = rewards_to_go(ep_rews)
                 batch_rews.extend(ep_rews_to_go)
-                print(f"Batch {i_batch + 1}, episode {ep_num} finished after {t} timesteps, total reward: {total_episode_reward}")
+                #print(f"Batch {i_batch + 1}, episode {ep_num} finished after {t} timesteps, total reward: {total_episode_reward:.0f}")
                 if len(batch_obs) >= (args.num_eps_in_batch * env._max_episode_steps):
-                    agent.update(batch_obs, batch_acts, batch_rews)
-                    print(f"Updating after episode {ep_num} of batch {i_batch + 1}.")
+                    loss = agent.update(batch_obs, batch_acts, batch_rews)
+                    if args.wandb:
+                        wandb.log({'loss': loss.item()}, step=i_batch)
+                        if ((i_batch+1) % (args.num_batches // 5)) == 0:
+                            torch.save({
+                                'epoch': i_batch,
+                                'model_state_dict': agent.pi_net.state_dict(),
+                                'optimizer_state_dict': agent.optimizer.state_dict(),
+                                'loss': loss,
+                                }, args.checkpoint_model_file)
+                            wandb.save(args.checkpoint_model_file)
+                    print(f"Batch {i_batch + 1}, episode {ep_num}, timesteps {t}, last reward: {total_episode_reward:.0f}, loss: {loss:.2f}.")
+                    i_batch += 1
                     break
                 observation = env.reset(seed=args.seed)[0]
                 t = 0
@@ -162,8 +211,9 @@ if __name__ == "__main__":
     args.batch_size = args.num_eps_in_batch * args.max_ep_steps
     run_name = printing(args, env)
     if args.wandb:
+        import os
         import wandb
-        wandb_init(args)
+        run = wandb_init(args)
     # env = gym.wrappers.RecordVideo(env, "/home/elliot/DRL_Gym_PyTorch/wandb/videos/")
     start_time = time.time()
     all_episode_rews = train(env, agent, args)

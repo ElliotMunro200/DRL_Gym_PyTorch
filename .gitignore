@@ -1,2 +1,7 @@
 wandb/
 runs/
+.idea/
+__pycache__/
+*.pt
+*.tar
+*.xml

@@ -5,6 +5,8 @@ from torch.optim import Adam
 import numpy as np
 import gym
 
+from GAE import GAE
+
 # get batch of experience
 # update policy - clip loss
 # update value function - MSE loss on returns
@@ -30,6 +32,8 @@ class PPO_Agent(nn.Module):
             {'params': self.critic.parameters(), 'lr': 1e-2}
         ])
         self.clip_param = 0.2
+        self.gamma = 0.99 # GAE
+        self.lambda_ = 0.9 # GAE
         self.MseLoss = nn.MSELoss()
         self.batch_obs = []
         self.batch_acts = []
@@ -73,7 +77,19 @@ class PPO_Agent(nn.Module):
         batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages = self.get_buffer_data()
         batch_rets = torch.tensor(np.array(self.rewards_to_go()), dtype=torch.float32)
         state_values = self.critic(batch_obs).squeeze()
-        batch_advantages = batch_rets.detach() - state_values.detach()
+        #batch_advantages = batch_rets.detach() - state_values.detach()
+        ep_len = len(batch_rews) # GAE
+        episode_GAE = GAE(1, ep_len, self.gamma, self.lambda_) # GAE
+        dones_np = np.zeros((1, ep_len-1)) # GAE
+        dones_np = np.append(dones_np, 1.0) # GAE
+        dones_np = np.expand_dims(dones_np, axis=0)  # GAE
+        state_values_np = state_values.detach().numpy() # GAE
+        state_values_np = np.append(state_values_np, 0.0) # GAE
+        state_values_np = np.expand_dims(state_values_np, axis=0) # GAE
+        batch_rews_np = batch_rews.detach().numpy()
+        batch_rews_np = np.expand_dims(batch_rews_np, axis=0) # GAE
+        batch_advantages = episode_GAE(dones_np, batch_rews_np, state_values_np) # GAE
+        batch_advantages = torch.from_numpy(batch_advantages)
         self.batch_advantages.append(batch_advantages)
 
         logp = self.get_policy(batch_obs).log_prob(batch_acts)
