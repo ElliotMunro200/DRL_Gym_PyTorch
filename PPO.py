@@ -12,7 +12,7 @@ from GAE import GAE
 # update value function - MSE loss on returns
 
 class PPO_Agent(nn.Module):
-    def __init__(self, obs_dim, act_dim, hidden_dim):
+    def __init__(self, obs_dim, act_dim, hidden_dim, args):
         super(PPO_Agent, self).__init__()
         self.obs_dim = obs_dim
         self.act_dim = act_dim
@@ -32,8 +32,12 @@ class PPO_Agent(nn.Module):
             {'params': self.critic.parameters(), 'lr': 1e-2}
         ])
         self.clip_param = 0.2
-        self.gamma = 0.99 # GAE
-        self.lambda_ = 0.9 # GAE
+        self.GAE = args.GAE
+        print(f"GAE: {self.GAE}")
+        if args.GAE:
+            self.GAE = True
+            self.gamma = 0.99
+            self.lambda_ = 0.9
         self.MseLoss = nn.MSELoss()
         self.batch_obs = []
         self.batch_acts = []
@@ -68,6 +72,21 @@ class PPO_Agent(nn.Module):
         logp = dist.log_prob(action)
         return action.item(), logp.item()
 
+    def execute_GAE(self, batch_rews, state_values):
+        ep_len = len(batch_rews) # GAE
+        episode_GAE = GAE(1, ep_len, self.gamma, self.lambda_) # GAE
+        dones_np = np.zeros((1, ep_len-1)) # GAE
+        dones_np = np.append(dones_np, 1.0) # GAE
+        dones_np = np.expand_dims(dones_np, axis=0)  # GAE
+        state_values_np = state_values.detach().numpy() # GAE
+        state_values_np = np.append(state_values_np, 0.0) # GAE
+        state_values_np = np.expand_dims(state_values_np, axis=0) # GAE
+        batch_rews_np = batch_rews.detach().numpy() # GAE
+        batch_rews_np = np.expand_dims(batch_rews_np, axis=0) # GAE
+        batch_advantages = episode_GAE(dones_np, batch_rews_np, state_values_np) # GAE
+        batch_advantages = torch.from_numpy(batch_advantages) # GAE
+        return batch_advantages
+
     def rewards_to_go(self):
         episode_rewards = self.batch_rews.copy()
         rews_to_go = [sum(episode_rewards[i:]) for i in range(len(episode_rewards))]
@@ -77,19 +96,10 @@ class PPO_Agent(nn.Module):
         batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages = self.get_buffer_data()
         batch_rets = torch.tensor(np.array(self.rewards_to_go()), dtype=torch.float32)
         state_values = self.critic(batch_obs).squeeze()
-        #batch_advantages = batch_rets.detach() - state_values.detach()
-        ep_len = len(batch_rews) # GAE
-        episode_GAE = GAE(1, ep_len, self.gamma, self.lambda_) # GAE
-        dones_np = np.zeros((1, ep_len-1)) # GAE
-        dones_np = np.append(dones_np, 1.0) # GAE
-        dones_np = np.expand_dims(dones_np, axis=0)  # GAE
-        state_values_np = state_values.detach().numpy() # GAE
-        state_values_np = np.append(state_values_np, 0.0) # GAE
-        state_values_np = np.expand_dims(state_values_np, axis=0) # GAE
-        batch_rews_np = batch_rews.detach().numpy()
-        batch_rews_np = np.expand_dims(batch_rews_np, axis=0) # GAE
-        batch_advantages = episode_GAE(dones_np, batch_rews_np, state_values_np) # GAE
-        batch_advantages = torch.from_numpy(batch_advantages)
+        if not self.GAE:
+            batch_advantages = batch_rets.detach() - state_values.detach()
+        elif self.GAE:
+            batch_advantages = self.execute_GAE(batch_rews, state_values)
         self.batch_advantages.append(batch_advantages)
 
         logp = self.get_policy(batch_obs).log_prob(batch_acts)
@@ -104,9 +114,9 @@ class PPO_Agent(nn.Module):
 
         return loss.mean(), state_values.mean()
 
-def train(env_name='CartPole-v1', hidden_size=32):
+def train(args, env_name='CartPole-v1', hidden_size=32):
     env = gym.make(env_name)
-    agent = PPO_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size)
+    agent = PPO_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size, args)
     max_episodes = 500
     training_rewards_by_episode = []
     for ep in range(max_episodes):
@@ -138,11 +148,19 @@ def plot(ep_rews):
     plt.ylabel("Total rewards")
     plt.show()
 
+def get_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='DRL_Gym_PyTorch args for PPO')
+    # General Arguments
+    parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
+    args = parser.parse_args()
+    return args
 
 if __name__ == '__main__':
     import time
+    args = get_args()
     start_time = time.time()
-    ep_rews = train()
+    ep_rews = train(args)
     end_time = time.time()
     print(f"END_TIME: {end_time-start_time}")
     plot(ep_rews)
