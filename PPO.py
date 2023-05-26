@@ -5,6 +5,7 @@ from torch.optim import Adam
 import numpy as np
 import gym
 
+from utils import get_args
 from GAE import GAE
 
 # get batch of experience
@@ -147,14 +148,6 @@ def plot(ep_rews):
     plt.xlabel("Episode")
     plt.ylabel("Total rewards")
     plt.show()
-
-def get_args():
-    import argparse
-    parser = argparse.ArgumentParser(description='DRL_Gym_PyTorch args for PPO')
-    # General Arguments
-    parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
-    args = parser.parse_args()
-    return args
 
 if __name__ == '__main__':
     import time
