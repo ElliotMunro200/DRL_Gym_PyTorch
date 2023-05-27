@@ -150,7 +150,7 @@ if __name__ == "__main__":
     import time
     args = get_args()
     env = gym.make(args.env_id, render_mode="rgb_array")
-    agent = VPG_Agent(env.observation_space.shape[0], env.action_space, args.hidden_size)
+    agent = VPG_Agent(env.observation_space.shape[0], env.action_space, args.hidden_sizes[0])
     args.max_ep_steps = env._max_episode_steps
     args.batch_size = args.num_eps_in_batch * args.max_ep_steps
     run_name = printing(args, env)

@@ -100,7 +100,7 @@ class PPO_Agent(nn.Module):
         if not self.GAE:
             batch_advantages = batch_rets.detach() - state_values.detach()
         elif self.GAE:
-            batch_advantages = self.execute_GAE(batch_rews, state_values)
+            batch_advantages = self.execute_GAE(batch_rews, state_values.detach())
         self.batch_advantages.append(batch_advantages)
 
         logp = self.get_policy(batch_obs).log_prob(batch_acts)

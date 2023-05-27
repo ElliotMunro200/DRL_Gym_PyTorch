@@ -8,12 +8,12 @@ def get_args():
     # General Arguments
     parser.add_argument('--env_id', type=str, default="CartPole-v1", help='The RL environment (default: CartPole-v1)')
     parser.add_argument('--algo', type=str, default="VPG", help='The RL agent (default: VPG)')
-    parser.add_argument('-hs', '--hidden_size', type=int, default=32, help='The agent hidden size (default: 32)')
+    parser.add_argument('-hs', '--hidden_sizes', type=int, default=(32, 32), help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
-    parser.add_argument('--num_steps_in_batch', type=int, default=100, help='# number of steps (default: 100)')
-    parser.add_argument('--training_steps', type=int, default=10000, help='# number of total steps (default: 10000)')
+    parser.add_argument('--num_steps_in_batch', type=int, default=10, help='# of steps before updating (default: 100)')
+    parser.add_argument('--training_steps', type=int, default=10000, help='# of total training steps (default: 10000)')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
     # Experiment Execution Arguments
     parser.add_argument('--n_env', type=int, default=2, help='# number of parallel env processes (default: 2)')
@@ -40,7 +40,7 @@ def printing(args, env):
         print(f"env Box shape: {env.action_space.shape[0]}")
     print(f"env.observation_space.shape[0]: {env.observation_space.shape[0]}")
     print(f"env._max_episode_steps: {env._max_episode_steps}")
-    run_name = f"{args.env_id}, {args.algo}, hidden_size={args.hidden_size}, num_batches={args.num_batches}, batch_size={args.batch_size}"
+    run_name = f"{args.env_id}, {args.algo}, hidden_sizes={args.hidden_sizes}, num_batches={args.num_batches}, batch_size={args.num_steps_in_batch}"
     print(f"RUN_NAME: {run_name}")
     return run_name
 
