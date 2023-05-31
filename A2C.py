@@ -24,7 +24,7 @@ import numpy as np
 from copy import deepcopy
 from utils import get_args, printing
 from GAE import GAE
-from AC_base import MLPActorCritic
+from AC_base import combined_shape, MLPActorCritic
 
 class A2C_Buffer():
     def __init__(self, args, obs_dim, act_dim):
@@ -37,7 +37,7 @@ class A2C_Buffer():
         self.act_dim = act_dim
         self.obss = np.zeros((self.n_env, self.batch_steps, self.obs_dim))
         self.vals = np.zeros((self.n_env, self.batch_steps))
-        self.acts = np.zeros((self.n_env, self.batch_steps, self.act_dim))
+        self.acts = np.zeros((self.n_env, self.batch_steps)) # , self.act_dim
         self.rews = np.zeros((self.n_env, self.batch_steps))
         self.dones = np.zeros((self.n_env, self.batch_steps))
         self.truncs = np.zeros((self.n_env, self.batch_steps))
@@ -72,16 +72,15 @@ class A2C_Buffer():
             self.advs = self.execute_GAE(self.rews, self.vals)
 
     def get(self):
-        obss = torch.from_numpy(self.obss)
-        acts = torch.from_numpy(self.acts)
-        rets = torch.from_numpy(self.rets)
-        advs = torch.from_numpy(self.advs)
+        obss = torch.from_numpy(self.obss).type(torch.float32)
+        acts = torch.from_numpy(self.acts).type(torch.float32)
+        rets = torch.from_numpy(self.rets).type(torch.float32)
+        advs = torch.from_numpy(self.advs).type(torch.float32)
         if self.master_device != "cpu":
-            obss.to(self.master_device)
-            acts.to(self.master_device)
-            rets.to(self.master_device)
-            advs.to(self.master_device)
-        print(f"MASTER: {obss.device}, {self.master_device}")
+            obss = obss.to(self.master_device)
+            acts = acts.to(self.master_device)
+            rets = rets.to(self.master_device)
+            advs = advs.to(self.master_device)
         return obss, acts, rets, advs
 
 class A2C_Agent(nn.Module):
@@ -90,10 +89,7 @@ class A2C_Agent(nn.Module):
         self.obs_space = obs_space
         self.obs_dim = self.obs_space.shape[0]
         self.act_space = act_space
-        if isinstance(self.act_space, Discrete):
-            self.act_dim = self.act_space.n
-        elif isinstance(self.act_space, Box):
-            self.act_dim = self.act_space.shape[0]
+        self.act_dim = self.act_space.shape
         self.args = args
         self.h_sizes = args.hidden_sizes
         self.device = args.device
@@ -109,6 +105,8 @@ class A2C_Agent(nn.Module):
             self.GAE = True
             self.gamma = 0.99
             self.lambda_ = 0.9
+        self.optimizer = Adam(self.ac_master.parameters(), lr=1e-2)
+        self.MseLoss = nn.MSELoss()
         self.T = 0
         self.rewards_by_episode = []  # todo
 
@@ -128,8 +126,9 @@ class A2C_Agent(nn.Module):
     def batch_update(self):
         self.buffer_workers.compute_rets()
         self.buffer_workers.compute_advs()
+        # .get() flattens out all it gets so the loss can be calculated as usual.
+        # We can do this since each transition is just used as an independent sample.
         obss, acts, rets, advs = self.buffer_workers.get()
-        print(f"DEVICES: {obss.device}, {acts.device}")
         _, logp_as = self.ac_master.pi(obss, acts)
         loss = -(logp_as * advs) + 0.5 * self.MseLoss(rets, self.ac_master.v(obss))
         self.optimizer.zero_grad()

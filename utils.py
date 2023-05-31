@@ -35,7 +35,7 @@ def printing(args, env):
     print(f"env.observation_space.high: {env.observation_space.high}")
     print(f"env.observation_space.low: {env.observation_space.low}")
     if isinstance(env.action_space, Discrete):
-        print(f"env Discrete shape: {env.action_space.n}")
+        print(f"env Discrete shape: {env.action_space.shape}, num actions: {env.action_space.n}")
     if isinstance(env.action_space, Box):
         print(f"env Box shape: {env.action_space.shape[0]}")
     print(f"env.observation_space.shape[0]: {env.observation_space.shape[0]}")
