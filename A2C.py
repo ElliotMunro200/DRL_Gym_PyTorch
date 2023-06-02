@@ -35,47 +35,78 @@ class A2C_Buffer():
         self.GAE = self.args.GAE
         self.obs_dim = obs_dim
         self.act_dim = act_dim
-        self.obss = np.zeros((self.n_env, self.batch_steps, self.obs_dim))
+        self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.obs_dim))
         self.vals = np.zeros((self.n_env, self.batch_steps))
-        self.acts = np.zeros((self.n_env, self.batch_steps)) # , self.act_dim
+        self.acts = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.act_dim))
         self.rews = np.zeros((self.n_env, self.batch_steps))
         self.dones = np.zeros((self.n_env, self.batch_steps))
         self.truncs = np.zeros((self.n_env, self.batch_steps))
         self.rets = np.zeros((self.n_env, self.batch_steps))
         self.advs = np.zeros((self.n_env, self.batch_steps))
+        self.num_store = 0
 
-    def add(self, obss, vals, acts, rews, dones, truncs): #todo
+    def refresh(self):
+        self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.obs_dim))
+        self.vals = np.zeros((self.n_env, self.batch_steps))
+        self.acts = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.act_dim))
+        self.rews = np.zeros((self.n_env, self.batch_steps))
+        self.dones = np.zeros((self.n_env, self.batch_steps))
+        self.truncs = np.zeros((self.n_env, self.batch_steps))
+        self.rets = np.zeros((self.n_env, self.batch_steps))
+        self.advs = np.zeros((self.n_env, self.batch_steps))
+        self.num_store = 0
+
+    def add(self, obss, vals, acts, rews, dones, truncs):
+        self.obss[:, self.num_store] = obss
+        self.vals[:, self.num_store] = vals
+        self.acts[:, self.num_store] = acts
+        self.rews[:, self.num_store] = rews
+        self.dones[:, self.num_store] = dones
+        self.truncs[:, self.num_store] = truncs
+        self.num_store += 1
         return
 
-    def compute_rets(self):  # todo
+    def compute_n_step_rets(self):
+
         return
 
-    def execute_GAE(self, batch_rews, state_values):  # todo
-        ep_len = batch_rews.shape[1]  # GAE
-        episode_GAE = GAE(self.n_env, ep_len, self.gamma, self.lambda_)  # GAE
-        dones_np = np.zeros((1, ep_len - 1))  # GAE
-        dones_np = np.append(dones_np, 1.0)  # GAE
-        dones_np = np.expand_dims(dones_np, axis=0)  # GAE
-        state_values_np = state_values.detach().numpy()  # GAE
-        state_values_np = np.append(state_values_np, 0.0)  # GAE
-        state_values_np = np.expand_dims(state_values_np, axis=0)  # GAE
-        batch_rews_np = batch_rews.detach().numpy()  # GAE
-        batch_rews_np = np.expand_dims(batch_rews_np, axis=0)  # GAE
-        batch_advantages = episode_GAE(dones_np, batch_rews_np, state_values_np)  # GAE
-        batch_advantages = torch.from_numpy(batch_advantages)  # GAE
+    def execute_GAE(self):  #todo
+        batch_len = self.rews.shape[1]
+        episode_GAE = GAE(self.n_env, batch_len, self.gamma, self.lambda_)
+        dones = deepcopy(self.dones)
+        dones = np.append(dones, 1.0)
+        dones = np.expand_dims(dones, axis=0)
+        state_values = deepcopy(self.vals)
+        state_values = np.append(state_values, 0.0)
+        state_values = np.expand_dims(state_values, axis=0)
+        batch_rews = deepcopy(self.rews)
+        batch_rews = np.expand_dims(batch_rews, axis=0)
+        batch_advantages = episode_GAE(dones, batch_rews, state_values)
+        batch_advantages = torch.from_numpy(batch_advantages).type(torch.float32)
         return batch_advantages
 
-    def compute_advs(self): #todo
+    def compute_advs(self):
         if not self.GAE:
             self.advs = self.rets - self.vals
         elif self.GAE:
-            self.advs = self.execute_GAE(self.rews, self.vals)
+            self.advs = self.execute_GAE()
 
     def get(self):
+        # converting to torch.float32 tensors
         obss = torch.from_numpy(self.obss).type(torch.float32)
         acts = torch.from_numpy(self.acts).type(torch.float32)
         rets = torch.from_numpy(self.rets).type(torch.float32)
         advs = torch.from_numpy(self.advs).type(torch.float32)
+        # flattening
+        obss = torch.flatten(obss, start_dim=0, end_dim=1)
+        acts = torch.flatten(acts, start_dim=0, end_dim=1)
+        rets = torch.flatten(rets, start_dim=0, end_dim=1)
+        advs = torch.flatten(advs, start_dim=0, end_dim=1)
+        # advantage normalization trick (for faster learning)
+        advs_mean = torch.mean(advs)
+        advs_std = torch.std(advs)
+        advs = (advs - advs_mean) / advs_std
+        # put on GPU if using it
         if self.master_device != "cpu":
             obss = obss.to(self.master_device)
             acts = acts.to(self.master_device)
@@ -113,7 +144,7 @@ class A2C_Agent(nn.Module):
     def step(self, obss, rews=0.0, dones=False, truncs=False, infos=None):
         obss_tensor = torch.from_numpy(obss)
         actions, values, logp_actions = self.ac_workers.step(obss_tensor)
-        self.buffer_workers.add(obss, values, actions, rews, dones, truncs) #todo
+        self.buffer_workers.add(obss, values, actions, rews, dones, truncs)
         self.T += 1
         if self.T % args.num_steps_in_batch == 0:
             self.batch_update()
@@ -124,16 +155,17 @@ class A2C_Agent(nn.Module):
 
 
     def batch_update(self):
-        self.buffer_workers.compute_rets()
+        self.buffer_workers.compute_n_step_rets()
         self.buffer_workers.compute_advs()
         # .get() flattens out all it gets so the loss can be calculated as usual.
-        # We can do this since each transition is just used as an independent sample.
+        # We can do this since each timestep transition is used as an independent sample.
         obss, acts, rets, advs = self.buffer_workers.get()
         _, logp_as = self.ac_master.pi(obss, acts)
         loss = -(logp_as * advs) + 0.5 * self.MseLoss(rets, self.ac_master.v(obss))
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        self.buffer_workers.refresh()
         return
 
 def train(args):

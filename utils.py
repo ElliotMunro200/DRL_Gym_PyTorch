@@ -12,7 +12,7 @@ def get_args():
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
-    parser.add_argument('--num_steps_in_batch', type=int, default=10, help='# of steps before updating (default: 100)')
+    parser.add_argument('--num_steps_in_batch', type=int, default=5, help='# of steps before updating (default: 5)')
     parser.add_argument('--training_steps', type=int, default=10000, help='# of total training steps (default: 10000)')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
     # Experiment Execution Arguments

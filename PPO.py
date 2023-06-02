@@ -54,11 +54,11 @@ class PPO_Agent(nn.Module):
         self.batch_advantages = []
 
     def get_buffer_data(self):
-        batch_obs = torch.tensor(np.array(self.batch_obs)).detach()
-        batch_acts = torch.tensor(np.array(self.batch_acts)).detach()
-        batch_old_logp = torch.tensor(np.array(self.batch_old_logp)).detach()
-        batch_rews = torch.tensor(np.array(self.batch_rews)).detach()
-        batch_advantages = torch.tensor(np.array(self.batch_advantages)).detach()
+        batch_obs = torch.tensor(np.array(self.batch_obs))
+        batch_acts = torch.tensor(np.array(self.batch_acts))
+        batch_old_logp = torch.tensor(np.array(self.batch_old_logp))
+        batch_rews = torch.tensor(np.array(self.batch_rews))
+        batch_advantages = torch.tensor(np.array(self.batch_advantages))
         return batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages
 
     def get_policy(self, obs_tensor):
