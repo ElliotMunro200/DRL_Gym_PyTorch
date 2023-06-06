@@ -44,6 +44,8 @@ class A2C_Buffer():
         self.rets = np.zeros((self.n_env, self.batch_steps))
         self.advs = np.zeros((self.n_env, self.batch_steps))
         self.num_store = 0
+        self.rews_by_ep = []
+        self.rews_current_ep = np.array(())
 
     def refresh(self):
         self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.obs_dim))
@@ -52,8 +54,8 @@ class A2C_Buffer():
         self.rews = np.zeros((self.n_env, self.batch_steps))
         self.dones = np.zeros((self.n_env, self.batch_steps))
         self.truncs = np.zeros((self.n_env, self.batch_steps))
-        self.rets = np.zeros((self.n_env, self.batch_steps))
-        self.advs = np.zeros((self.n_env, self.batch_steps))
+        self.rets = np.zeros((self.n_env, self.batch_steps-1))
+        self.advs = np.zeros((self.n_env, self.batch_steps-1))
         self.num_store = 0
 
     def add(self, obss, vals, acts, rews, dones, truncs):
@@ -67,20 +69,24 @@ class A2C_Buffer():
         return
 
     def compute_n_step_rets(self):
-
+        dones = deepcopy(self.dones)
+        rewards = deepcopy(self.rews)
+        ret_t = np.zeros([0 if d else self.vals[i, -1] for i, d in enumerate(self.dones[:, -1])])
+        for t in reversed(range(self.batch_steps-1)):
+            mask = 1.0 - dones[:, t+1]
+            ret_t = rewards[:, t+1] + self.gamma * mask * ret_t
+            self.rets[:, t] = ret_t
         return
 
-    def execute_GAE(self):  #todo
+    def execute_GAE(self):
         batch_len = self.rews.shape[1]
         episode_GAE = GAE(self.n_env, batch_len, self.gamma, self.lambda_)
         dones = deepcopy(self.dones)
-        dones = np.append(dones, 1.0)
-        dones = np.expand_dims(dones, axis=0)
+        #dones = np.expand_dims(dones, axis=0)
         state_values = deepcopy(self.vals)
-        state_values = np.append(state_values, 0.0)
-        state_values = np.expand_dims(state_values, axis=0)
+        #state_values = np.expand_dims(state_values, axis=0)
         batch_rews = deepcopy(self.rews)
-        batch_rews = np.expand_dims(batch_rews, axis=0)
+        #batch_rews = np.expand_dims(batch_rews, axis=0)
         batch_advantages = episode_GAE(dones, batch_rews, state_values)
         batch_advantages = torch.from_numpy(batch_advantages).type(torch.float32)
         return batch_advantages
@@ -93,8 +99,8 @@ class A2C_Buffer():
 
     def get(self):
         # converting to torch.float32 tensors
-        obss = torch.from_numpy(self.obss).type(torch.float32)
-        acts = torch.from_numpy(self.acts).type(torch.float32)
+        obss = torch.from_numpy(self.obss[:,:-1]).type(torch.float32)
+        acts = torch.from_numpy(self.acts[:,:-1]).type(torch.float32)
         rets = torch.from_numpy(self.rets).type(torch.float32)
         advs = torch.from_numpy(self.advs).type(torch.float32)
         # flattening
@@ -139,7 +145,7 @@ class A2C_Agent(nn.Module):
         self.optimizer = Adam(self.ac_master.parameters(), lr=1e-2)
         self.MseLoss = nn.MSELoss()
         self.T = 0
-        self.rewards_by_episode = []  # todo
+        self.rewards_by_episode = self.buffer_workers.rews_by_ep
 
     def step(self, obss, rews=0.0, dones=False, truncs=False, infos=None):
         obss_tensor = torch.from_numpy(obss)
