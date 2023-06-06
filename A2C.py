@@ -45,7 +45,7 @@ class A2C_Buffer():
         self.advs = np.zeros((self.n_env, self.batch_steps))
         self.num_store = 0
         self.rews_by_ep = []
-        self.rews_current_ep = np.array(())
+        self.rews_current_ep = np.zeros((self.n_env,))
 
     def refresh(self):
         self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.obs_dim))
@@ -58,6 +58,26 @@ class A2C_Buffer():
         self.advs = np.zeros((self.n_env, self.batch_steps-1))
         self.num_store = 0
 
+    def tally_rewards(self):
+        for w in range(self.n_env):
+            if True not in self.dones[w, :]:
+                self.rews_current_ep[w] += sum(self.rews[w, :])
+            else:
+                inds = np.where(self.dones[w, :] == True)
+                inds = np.insert(inds, 0, 0)
+                inds = np.append(inds, self.batch_steps-1)
+                rew_tots = [sum(self.rews[w, inds[i]:inds[i+1]]) for i in range(len(inds)-1)]
+                    
+                for i, r in enumerate(rew_tots):
+                    if i == 0: 
+                        self.rews_current_ep[w] += r
+                        self.rews_by_ep.append(self.rews_current_ep[w])
+                    elif (i!=0 and i < (len(rew_tots)-1)):
+                        self.rews_by_ep.append(r)
+                    else:
+                        self.rews_current_ep[w] = r
+                
+    
     def add(self, obss, vals, acts, rews, dones, truncs):
         self.obss[:, self.num_store] = obss
         self.vals[:, self.num_store] = vals
@@ -171,6 +191,7 @@ class A2C_Agent(nn.Module):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+        self.buffer_workers.tally_rewards()
         self.buffer_workers.refresh()
         return
 
