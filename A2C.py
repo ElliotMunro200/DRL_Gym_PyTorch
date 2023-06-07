@@ -32,15 +32,18 @@ class A2C_Buffer():
         self.master_device = args.device
         self.n_env = self.args.n_env
         self.batch_steps = self.args.num_steps_in_batch
+        self.gamma = args.gamma
         self.GAE = self.args.GAE
+        if self.GAE:
+            self.lambda_ = args.lambda_
         self.obs_dim = obs_dim
         self.act_dim = act_dim
-        self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.obs_dim))
-        self.vals = np.zeros((self.n_env, self.batch_steps))
-        self.acts = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.act_dim))
-        self.rews = np.zeros((self.n_env, self.batch_steps))
-        self.dones = np.zeros((self.n_env, self.batch_steps))
-        self.truncs = np.zeros((self.n_env, self.batch_steps))
+        self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps+1, self.obs_dim))
+        self.vals = np.zeros((self.n_env, self.batch_steps+1))
+        self.acts = np.zeros((self.n_env,) + combined_shape(self.batch_steps+1, self.act_dim))
+        self.rews = np.zeros((self.n_env, self.batch_steps+1))
+        self.dones = np.zeros_like(self.rews, dtype=bool)
+        self.truncs = np.zeros((self.n_env, self.batch_steps+1))
         self.rets = np.zeros((self.n_env, self.batch_steps))
         self.advs = np.zeros((self.n_env, self.batch_steps))
         self.num_store = 0
@@ -48,36 +51,29 @@ class A2C_Buffer():
         self.rews_current_ep = np.zeros((self.n_env,))
 
     def refresh(self):
-        self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.obs_dim))
-        self.vals = np.zeros((self.n_env, self.batch_steps))
-        self.acts = np.zeros((self.n_env,) + combined_shape(self.batch_steps, self.act_dim))
-        self.rews = np.zeros((self.n_env, self.batch_steps))
-        self.dones = np.zeros((self.n_env, self.batch_steps))
-        self.truncs = np.zeros((self.n_env, self.batch_steps))
-        self.rets = np.zeros((self.n_env, self.batch_steps-1))
-        self.advs = np.zeros((self.n_env, self.batch_steps-1))
-        self.num_store = 0
+        # Putting last elements of last batch into first position of the new batch since we are still on that step
+        obss_last = self.obss[:, -1, ...]
+        vals_last = self.vals[:, -1]
+        acts_last = self.acts[:, -1, ...]
+        rews_last = self.rews[:, -1]
+        dones_last = self.dones[:, -1]
+        truncs_last = self.truncs[:, -1]
+        self.obss = np.zeros((self.n_env,) + combined_shape(self.batch_steps+1, self.obs_dim))
+        self.vals = np.zeros((self.n_env, self.batch_steps+1))
+        self.acts = np.zeros((self.n_env,) + combined_shape(self.batch_steps+1, self.act_dim))
+        self.rews = np.zeros((self.n_env, self.batch_steps+1))
+        self.dones = np.zeros_like(self.rews, dtype=bool)
+        self.truncs = np.zeros((self.n_env, self.batch_steps+1))
+        self.rets = np.zeros((self.n_env, self.batch_steps))
+        self.advs = np.zeros((self.n_env, self.batch_steps))
+        self.obss[:, 0, ...] = obss_last
+        self.vals[:, 0] = vals_last
+        self.acts[:, 0, ...] = acts_last
+        self.rews[:, 0] = rews_last
+        self.dones[:, 0] = dones_last
+        self.truncs[:, 0] = truncs_last
+        self.num_store = 1
 
-    def tally_rewards(self):
-        for w in range(self.n_env):
-            if True not in self.dones[w, :]:
-                self.rews_current_ep[w] += sum(self.rews[w, :])
-            else:
-                inds = np.where(self.dones[w, :] == True)
-                inds = np.insert(inds, 0, 0)
-                inds = np.append(inds, self.batch_steps-1)
-                rew_tots = [sum(self.rews[w, inds[i]:inds[i+1]]) for i in range(len(inds)-1)]
-                    
-                for i, r in enumerate(rew_tots):
-                    if i == 0: 
-                        self.rews_current_ep[w] += r
-                        self.rews_by_ep.append(self.rews_current_ep[w])
-                    elif (i!=0 and i < (len(rew_tots)-1)):
-                        self.rews_by_ep.append(r)
-                    else:
-                        self.rews_current_ep[w] = r
-                
-    
     def add(self, obss, vals, acts, rews, dones, truncs):
         self.obss[:, self.num_store] = obss
         self.vals[:, self.num_store] = vals
@@ -88,11 +84,32 @@ class A2C_Buffer():
         self.num_store += 1
         return
 
+    def tally_rewards(self):
+        # For each worker
+        for w in range(self.n_env):
+            # If no dones, add all rewards to current tallies
+            if True not in self.dones[w, :]:
+                self.rews_current_ep[w] += sum(self.rews[w, :])
+            # Else, find where the dones are and add the rewards accordingly
+            else:
+                inds = np.where(self.dones[w, :] == True)[0]
+                # Adding rewards to end the previously ongoing tally, and adding to episodic rewards list
+                r_end_last = sum(self.rews[w, 0:inds[0]+1])
+                self.rews_current_ep[w] += r_end_last
+                self.rews_by_ep.append(self.rews_current_ep[w])
+                # Making new ongoing tally from the last rewards in the batch
+                r_last = sum(self.rews[w, inds[-1]+1:])
+                self.rews_current_ep[w] = r_last
+                # Adding full episodes in batch straight to episodic rewards list
+                rew_tots = [sum(self.rews[w, inds[i]+1:inds[i+1]+1]) for i in range(len(inds)-1)]
+                for ep_rew in rew_tots:
+                    self.rews_by_ep.append(ep_rew)
+
     def compute_n_step_rets(self):
         dones = deepcopy(self.dones)
         rewards = deepcopy(self.rews)
-        ret_t = np.zeros([0 if d else self.vals[i, -1] for i, d in enumerate(self.dones[:, -1])])
-        for t in reversed(range(self.batch_steps-1)):
+        ret_t = np.array([0.0 if d else self.vals[i, -1] for i, d in enumerate(self.dones[:, -1])])
+        for t in reversed(range(self.batch_steps)):
             mask = 1.0 - dones[:, t+1]
             ret_t = rewards[:, t+1] + self.gamma * mask * ret_t
             self.rets[:, t] = ret_t
@@ -113,7 +130,7 @@ class A2C_Buffer():
 
     def compute_advs(self):
         if not self.GAE:
-            self.advs = self.rets - self.vals
+            self.advs = self.rets - self.vals[:, :-1]
         elif self.GAE:
             self.advs = self.execute_GAE()
 
@@ -157,22 +174,17 @@ class A2C_Agent(nn.Module):
         self.n_env = args.n_env
         self.batch_steps = args.num_steps_in_batch
         self.buffer_workers = A2C_Buffer(self.args, self.obs_dim, self.act_dim)
-        self.GAE = False
-        if args.GAE:
-            self.GAE = True
-            self.gamma = 0.99
-            self.lambda_ = 0.9
         self.optimizer = Adam(self.ac_master.parameters(), lr=1e-2)
         self.MseLoss = nn.MSELoss()
         self.T = 0
         self.rewards_by_episode = self.buffer_workers.rews_by_ep
 
-    def step(self, obss, rews=0.0, dones=False, truncs=False, infos=None):
+    def step(self, obss, rews=np.array([0.0]), dones=np.array([False]), truncs=np.array([False]), infos=np.array([None])):
         obss_tensor = torch.from_numpy(obss)
         actions, values, logp_actions = self.ac_workers.step(obss_tensor)
         self.buffer_workers.add(obss, values, actions, rews, dones, truncs)
         self.T += 1
-        if self.T % args.num_steps_in_batch == 0:
+        if self.T % self.batch_steps == 0:
             self.batch_update()
             with torch.no_grad():
                 self.ac_workers.pi.load_state_dict(self.ac_master.pi.state_dict())
@@ -187,7 +199,7 @@ class A2C_Agent(nn.Module):
         # We can do this since each timestep transition is used as an independent sample.
         obss, acts, rets, advs = self.buffer_workers.get()
         _, logp_as = self.ac_master.pi(obss, acts)
-        loss = -(logp_as * advs) + 0.5 * self.MseLoss(rets, self.ac_master.v(obss))
+        loss = -(logp_as * advs).mean() + 0.5 * self.MseLoss(rets, self.ac_master.v(obss))
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
@@ -224,5 +236,5 @@ if __name__ == "__main__":
     start_time = time.time()
     rewards_by_episode = train(args)
     end_time = time.time()
-    print(f"TOTAL TRAINING TIME: {end_time - start_time}")
+    print(f"TOTAL TRAINING TIME: {end_time - start_time:.2f}s")
     plot(rewards_by_episode, args)
