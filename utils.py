@@ -6,13 +6,13 @@ def get_args():
     import argparse
     parser = argparse.ArgumentParser(description='DRL_Gym_PyTorch args')
     # General Arguments
-    parser.add_argument('--env_id', type=str, default="CartPole-v1", help='The RL environment (default: CartPole-v1)')
+    parser.add_argument('-env', '--env_id', type=str, default="CartPole-v1", help='The RL environment (default: CartPole-v1)')
     parser.add_argument('--algo', type=str, default="VPG", help='The RL agent (default: VPG)')
     parser.add_argument('-hs', '--hidden_sizes', type=int, default=(32, 32), help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
-    parser.add_argument('-nsb', '--num_steps_in_batch', type=int, default=5, help='# of steps before updating (default: 5)')
+    parser.add_argument('-nsb', '--num_steps_in_batch', type=int, default=5, help='# of steps before updating (default: 200)')
     parser.add_argument('-t', '--training_steps', type=int, default=10000, help='# of total training steps (default: 10000)')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
     parser.add_argument('--gamma', type=float, default=0.99, help='# gamma value (default: 0.99)')

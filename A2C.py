@@ -23,7 +23,7 @@ import time
 import numpy as np
 from copy import deepcopy
 from utils import get_args, printing
-from GAE import GAE
+from GAE_edited import GAE
 from AC_base import combined_shape, MLPActorCritic
 
 class A2C_Buffer():
@@ -86,13 +86,14 @@ class A2C_Buffer():
 
     def tally_rewards(self):
         # For each worker
+        ep_end_array = np.logical_or(self.dones, self.truncs)
         for w in range(self.n_env):
             # If no dones, add all rewards to current tallies
-            if True not in self.dones[w, :]:
+            if True not in ep_end_array[w, :]:
                 self.rews_current_ep[w] += sum(self.rews[w, :])
             # Else, find where the dones are and add the rewards accordingly
             else:
-                inds = np.where(self.dones[w, :] == True)[0]
+                inds = np.where(ep_end_array[w, :] == True)[0]
                 # Adding rewards to end the previously ongoing tally, and adding to episodic rewards list
                 r_end_last = sum(self.rews[w, 0:inds[0]+1])
                 self.rews_current_ep[w] += r_end_last
@@ -119,13 +120,9 @@ class A2C_Buffer():
         batch_len = self.rews.shape[1]
         episode_GAE = GAE(self.n_env, batch_len, self.gamma, self.lambda_)
         dones = deepcopy(self.dones)
-        #dones = np.expand_dims(dones, axis=0)
         state_values = deepcopy(self.vals)
-        #state_values = np.expand_dims(state_values, axis=0)
         batch_rews = deepcopy(self.rews)
-        #batch_rews = np.expand_dims(batch_rews, axis=0)
         batch_advantages = episode_GAE(dones, batch_rews, state_values)
-        batch_advantages = torch.from_numpy(batch_advantages).type(torch.float32)
         return batch_advantages
 
     def compute_advs(self):
@@ -136,8 +133,8 @@ class A2C_Buffer():
 
     def get(self):
         # converting to torch.float32 tensors
-        obss = torch.from_numpy(self.obss[:,:-1]).type(torch.float32)
-        acts = torch.from_numpy(self.acts[:,:-1]).type(torch.float32)
+        obss = torch.from_numpy(self.obss[:, :-1]).type(torch.float32)
+        acts = torch.from_numpy(self.acts[:, :-1]).type(torch.float32)
         rets = torch.from_numpy(self.rets).type(torch.float32)
         advs = torch.from_numpy(self.advs).type(torch.float32)
         # flattening
@@ -225,7 +222,7 @@ def train(args):
 def plot(ep_rews, args):
     import matplotlib.pyplot as plt
     plt.plot(ep_rews)
-    plt.title(f"{args.env_id}, A2C, hidden_dim={args.hidden_sizes}, epochs={args.num_batches}")
+    plt.title(f"{args.env_id}, A2C, hidden_dim={args.hidden_sizes}, batch size={args.num_steps_in_batch}, GAE: {args.GAE}")
     plt.xlabel("Episode")
     plt.ylabel("Total rewards")
     plt.show()
