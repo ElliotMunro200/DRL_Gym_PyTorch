@@ -82,7 +82,6 @@ class A2C_Buffer():
         self.dones[:, self.num_store] = dones
         self.truncs[:, self.num_store] = truncs
         self.num_store += 1
-        return
 
     def tally_rewards(self):
         # For each worker
@@ -164,7 +163,7 @@ class A2C_Agent(nn.Module):
         self.args = args
         self.h_sizes = args.hidden_sizes
         self.device = args.device
-        self.ac_master = MLPActorCritic(self.obs_space, self.act_space, hidden_sizes=(self.h_sizes))
+        self.ac_master = MLPActorCritic(self.obs_space, self.act_space, hidden_sizes=self.h_sizes)
         with torch.no_grad():
             self.ac_workers = deepcopy(self.ac_master)
         self.ac_master.to(self.device)
