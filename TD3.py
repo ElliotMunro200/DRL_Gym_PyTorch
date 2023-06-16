@@ -4,27 +4,28 @@ from torch.optim import Adam
 from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
-import random
+import itertools
 import gym
 
 from gym.spaces import Box
-from DDPG_base import MLPActorCritic_DDPG, DDPG_Buffer
+from DDPG_base import MLPActorCritic_TD3, DDPG_Buffer
 from utils import get_args, printing, plot
 
 
-class DDPG_Agent(nn.Module):
-    def __init__(self, obs_space, act_space, args):
+class TD3_Agent(nn.Module):
+    def __init__(self, obs_space, act_space, act_limit, args):
         super().__init__()
         self.obs_space = obs_space
         self.obs_dim = self.obs_space.shape[0]
         self.act_space = act_space
         assert isinstance(act_space, Box)
         self.act_dim = self.act_space.shape[0]
+        self.act_limit = act_limit
         self.args = args
         self.h_sizes = self.args.hidden_sizes
-        self.DDPG_ac = MLPActorCritic_DDPG(self.obs_space, self.act_space, hidden_sizes=self.h_sizes)
+        self.TD3_ac = MLPActorCritic_TD3(self.obs_space, self.act_space, hidden_sizes=self.h_sizes)
         with torch.no_grad():
-            self.DDPG_ac_target = deepcopy(self.DDPG_ac)
+            self.TD3_ac_target = deepcopy(self.TD3_ac)
         # Buffer+Rewards lists
         self.batch_size = args.num_steps_in_batch
         self.buffer_size = args.buffer_size
@@ -33,18 +34,25 @@ class DDPG_Agent(nn.Module):
         # Training params
         self.gamma = args.gamma
         self.tau = args.tau
+        self.target_noise = args.target_noise
+        self.noise_clip = args.noise_clip
         self.warmup_period = args.warmup_period
         self.update_period = args.update_period
+        self.delayed_update_period = args.delayed_update_period
         self.MseLoss = nn.MSELoss()
-        self.last_loss = 100000
-        self.optimizer = Adam(self.DDPG_ac.parameters(), lr=args.learning_rate)
+        self.last_Q_loss = 100000
+        self.optimizerPi = Adam(self.TD3_ac.pi.parameters(), lr=args.learning_rate)
+        self.q_params = itertools.chain(self.TD3_ac.q1.parameters(), self.TD3_ac.q2.parameters())
+        self.optimizerQ = Adam(self.q_params, lr=args.learning_rate)
+        # Step counters
         self.t = 0
         self.ep_t = 0
         self.ep = len(self.total_rews_by_ep)
+        self.n_update = 0
 
     def action_from_obs(self, obs):
         obs_tensor = torch.from_numpy(obs)
-        mean = self.DDPG_ac.pi(obs_tensor).item()
+        mean = self.TD3_ac.pi(obs_tensor).item()
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
         action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
         return action
@@ -58,36 +66,64 @@ class DDPG_Agent(nn.Module):
         return action
 
     def soft_target_weight_update(self):
-        Q_weights = self.DDPG_ac.q1.state_dict()
-        QTarget_weights = self.DDPG_ac_target.q1.state_dict()
+        Q_weights = self.TD3_ac.q1.state_dict()
+        QTarget_weights = self.TD3_ac_target.q1.state_dict()
         for key in Q_weights:
             QTarget_weights[key] = QTarget_weights[key] * self.tau + Q_weights[key] * (1 - self.tau)
-        self.DDPG_ac_target.q1.load_state_dict(QTarget_weights)
+        self.TD3_ac_target.q1.load_state_dict(QTarget_weights)
 
-        Pi_weights = self.DDPG_ac.pi.state_dict()
-        PiTarget_weights = self.DDPG_ac_target.pi.state_dict()
+        Pi_weights = self.TD3_ac.pi.state_dict()
+        PiTarget_weights = self.TD3_ac_target.pi.state_dict()
         for key in Pi_weights:
             PiTarget_weights[key] = PiTarget_weights[key] * self.tau + Pi_weights[key] * (1 - self.tau)
-        self.DDPG_ac_target.pi.load_state_dict(PiTarget_weights)
+        self.TD3_ac_target.pi.load_state_dict(PiTarget_weights)
 
     def update(self):
         data = self.buffer.sample_batch()
-        b_obs, b_acts, b_rews, b_terms, b_next_obs = data['obs'], data['act'], data['rew'], data['term'], data['obs2']
+        b_obs, b_acts, b_rews, b_terms, b_obs_2 = data['obs'], data['act'], data['rew'], data['term'], data['obs2']
 
-        Q_from_target = self.DDPG_ac_target.q1(b_next_obs, self.DDPG_ac_target.pi(b_next_obs))
-        targets = b_rews + self.gamma * (1 - b_terms.int()) * Q_from_target
-        Qvals = self.DDPG_ac.q1(b_obs, b_acts) #.unsqueeze(dim=1)
-
-        self.optimizer.zero_grad()
-        loss = self.MseLoss(Qvals, targets) + -1 * self.DDPG_ac.q1(b_obs, self.DDPG_ac.pi(b_obs)).mean()
-        loss.backward()
-        self.optimizer.step()
-        self.last_loss = loss
+        Q1 = self.TD3_ac.q1(b_obs, b_acts)
+        Q2 = self.TD3_ac.q2(b_obs, b_acts)
 
         with torch.no_grad():
-            self.soft_target_weight_update()
+            Pi_targ = self.TD3_ac_target.pi(b_obs_2)
+            epsilon = torch.randn_like(Pi_targ) * self.target_noise
+            epsilon = torch.clamp(epsilon, -self.noise_clip, self.noise_clip)
+            b_acts_2 = Pi_targ + epsilon
+            b_acts_2 = torch.clamp(b_acts_2, -self.act_limit, self.act_limit)
+            Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_acts_2)
+            Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_acts_2)
+            Q_pi_target = torch.min(Q1_pi_target, Q2_pi_target)
+            targets = b_rews + self.gamma * (1 - b_terms.int()) * Q_pi_target
 
-        return loss
+        Q1Loss = self.MseLoss(Q1, targets)
+        Q2Loss = self.MseLoss(Q2, targets)
+        QLoss = Q1Loss + Q2Loss
+
+        self.optimizerQ.zero_grad()
+        QLoss.backward()
+        self.optimizerQ.step()
+
+        self.last_Q_loss = QLoss
+
+        if self.n_update % self.delayed_update_period == 0:
+
+            for p in self.q_params:
+                p.requires_grad = False
+
+            self.optimizerPi.zero_grad()
+            PiLoss = -1 * self.TD3_ac.q1(b_obs, self.TD3_ac.pi(b_obs)).mean()
+            PiLoss.backward()
+            self.optimizerPi.step()
+            with torch.no_grad():
+                self.soft_target_weight_update()
+
+            for p in self.q_params:
+                p.requires_grad = True
+
+        self.n_update += 1
+
+        return QLoss
 
     def after_episode(self):
         bcs = self.buffer.curr_size
@@ -95,7 +131,7 @@ class DDPG_Agent(nn.Module):
         ep_rew = sum(ep_rews)
         self.total_rews_by_ep.append(ep_rew)
         self.ep = len(self.total_rews_by_ep)
-        print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last Loss: {self.last_loss:<4.1f} |")
+        print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
         self.ep_t = 0
 
     def step(self, obss, rews=0.0, terms=False, trunc=False):
@@ -107,7 +143,7 @@ class DDPG_Agent(nn.Module):
         if (self.buffer.curr_size >= self.warmup_period) and (self.t % self.update_period == 0):
             # one update for each timestep since last updating
             for _ in range(self.update_period):
-                loss = self.update()
+                QLoss = self.update()
         if (terms or trunc):
             self.after_episode()
         return acts
@@ -115,7 +151,7 @@ class DDPG_Agent(nn.Module):
 
 def train(args):
     env = gym.make(args.env_id)
-    agent = DDPG_Agent(env.observation_space, env.action_space, args)
+    agent = TD3_Agent(env.observation_space, env.action_space, env.action_space.high[0], args)
     actions, env_t = agent.step(env.reset()[0]), 0
     while agent.t < args.training_steps:
         obss, rews, terms, truncs, _ = env.step(actions)
@@ -127,7 +163,6 @@ def train(args):
         actions = agent.step(obss, rews, terms, truncs)
     total_rews_by_ep = agent.total_rews_by_ep
     return total_rews_by_ep
-
 
 if __name__ == "__main__":
     import time

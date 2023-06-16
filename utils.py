@@ -10,13 +10,22 @@ def get_args():
     parser.add_argument('--algo', type=str, default="VPG", help='The RL agent (default: VPG)')
     parser.add_argument('-hs', '--hidden_sizes', type=int, default=(32, 32), help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
+    parser.add_argument('-ne', '--num_episodes', type=int, default=50, help='Number of episodes (default: 50)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
-    parser.add_argument('-nsb', '--num_steps_in_batch', type=int, default=5, help='# of steps before updating (default: 200)')
-    parser.add_argument('-t', '--training_steps', type=int, default=10000, help='# of total training steps (default: 10000)')
+    parser.add_argument('-nsb', '--num_steps_in_batch', type=int, default=50, help='# of steps before updating (default: 50)')
+    parser.add_argument('-t', '--training_steps', type=int, default=20000, help='# of total training steps (default: 10000)')
+    parser.add_argument('--buffer_size', type=int, default=1000000, help='# off-policy buffer size (default: 1e6)')
+    parser.add_argument('--update_period', type=int, default=10, help='# of steps per update (default: 10)')
+    parser.add_argument('--delayed_update_period', type=int, default=2, help='# of critic updates per target+policy updates (default: 2)')
+    parser.add_argument('--warmup_period', type=int, default=500, help='# of steps before first update (default: 500)')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
-    parser.add_argument('--gamma', type=float, default=0.99, help='# gamma value (default: 0.99)')
-    parser.add_argument('--lambda_', type=float, default=0.90, help='# lambda value (default: 0.90)')
+    parser.add_argument('--gamma', type=float, default=0.99, help='gamma value (default: 0.99)')
+    parser.add_argument('--lambda_', type=float, default=0.90, help='lambda value (default: 0.90)')
+    parser.add_argument('--tau', type=float, default=0.995, help='tau value (default: 0.995)')
+    parser.add_argument('-lr', '--learning_rate', type=float, default=1e-3, help='optimizer lr value (default: 1e-3)')
+    parser.add_argument('--target_noise', type=float, default=0.2, help='noise added to target actions (default: 0.2)')
+    parser.add_argument('--noise_clip', type=float, default=0.5, help='target action noise clip value (default: 0.5)')
     # Experiment Execution Arguments
     parser.add_argument('--n_env', type=int, default=2, help='# number of parallel env processes (default: 2)')
     parser.add_argument('--cuda', action='store_true', default=False, help='enables CUDA training')
@@ -42,7 +51,7 @@ def printing(args, env):
         print(f"env Box shape: {env.action_space.shape[0]}")
     print(f"env.observation_space.shape[0]: {env.observation_space.shape[0]}")
     print(f"env._max_episode_steps: {env._max_episode_steps}")
-    run_name = f"{args.env_id}, {args.algo}, hidden_sizes={args.hidden_sizes}, num_batches={args.num_batches}, batch_size={args.num_steps_in_batch}"
+    run_name = f"{args.env_id}, {args.algo}, hidden_sizes={args.hidden_sizes}, training steps={args.training_steps}, batch_size={args.num_steps_in_batch}"
     print(f"RUN_NAME: {run_name}")
     return run_name
 
@@ -67,3 +76,11 @@ def rewards_to_go(ep_rews):
     for i in range(len(ep_rews)):
         ep_rews_to_go.append(sum(ep_rews[i:]))
     return ep_rews_to_go
+
+def plot(ep_rews, exp_info):
+    import matplotlib.pyplot as plt
+    plt.plot(ep_rews)
+    plt.title(exp_info)
+    plt.ylabel("Total Rewards")
+    plt.xlabel("Episode")
+    plt.show()
