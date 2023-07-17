@@ -115,8 +115,8 @@ class PPO_Agent(nn.Module):
 
         return loss.mean(), state_values.mean()
 
-def train(args, env_name='CartPole-v1', hidden_size=32):
-    env = gym.make(env_name)
+def train(args, hidden_size=32):
+    env = gym.make(args.env_id)
     agent = PPO_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size, args)
     max_episodes = 500
     training_rewards_by_episode = []

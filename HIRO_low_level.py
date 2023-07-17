@@ -5,11 +5,11 @@ from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
 import itertools
-import gym
 
+import time
 from gym.spaces import Box
 from DDPG_base_2 import MLP_GoalActorCritic_TD3, DDPG_Buffer
-from utils import get_args, printing, plot
+from utils import get_args, printing, make_env, Subgoal, evaluate_policy, plot
 
 
 class TD3_Goal_Agent(nn.Module):
@@ -21,6 +21,9 @@ class TD3_Goal_Agent(nn.Module):
         assert isinstance(act_space, Box)
         self.act_dim = self.act_space.shape[0]
         self.act_limit = act_limit
+        self.subgoal_dim = args.subgoal_dim
+        self.subgoal_space = Subgoal(self.subgoal_dim)
+        self.sg = None
         self.args = args
         self.h_sizes = self.args.hidden_sizes
         self.TD3_ac = MLP_GoalActorCritic_TD3(self.obs_space, self.act_space, hidden_sizes=self.h_sizes)
@@ -52,7 +55,8 @@ class TD3_Goal_Agent(nn.Module):
 
     def action_from_obs(self, obs):
         obs_tensor = torch.from_numpy(obs)
-        mean = self.TD3_ac.pi(obs_tensor).item()
+        goal_tensor = deepcopy(self.sg)
+        mean = self.TD3_ac.pi(obs_tensor, goal_tensor).item()
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
         action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
         return action
@@ -125,6 +129,10 @@ class TD3_Goal_Agent(nn.Module):
 
         return QLoss
 
+    def before_episode(self):
+        sg_numpy = self.subgoal.action_space.sample()
+        self.sg = torch.from_numpy(sg_numpy)
+
     def after_episode(self):
         bcs = self.buffer.curr_size
         ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
@@ -135,6 +143,8 @@ class TD3_Goal_Agent(nn.Module):
         self.ep_t = 0
 
     def step(self, obss, rews=0.0, terms=False, trunc=False):
+        if self.ep_t == 0:
+            self.before_episode()
         acts = self.action_select(obss)
         self.buffer.store(obss, acts, rews, terms)
         self.t += 1
@@ -149,9 +159,9 @@ class TD3_Goal_Agent(nn.Module):
         return acts
 
 
-def train(args):
-    env = gym.make(args.env_id)
-    agent = TD3_Goal_Agent(env.observation_space, env.action_space, env.action_space.high[0], args)
+def train(args, env, agent):
+    start_training_time = time.time()
+
     actions, env_t = agent.step(env.reset()[0]), 0
     while agent.t < args.training_steps:
         obss, rews, terms, truncs, _ = env.step(actions)
@@ -162,14 +172,21 @@ def train(args):
         assert agent.t == env_t  # to remove
         actions = agent.step(obss, rews, terms, truncs)
     total_rews_by_ep = agent.total_rews_by_ep
+
+    end_training_time = time.time()
+    print(f"TOTAL TRAINING TIME: {end_training_time - start_training_time:.2f}s")
+
     return total_rews_by_ep
 
 if __name__ == "__main__":
-    import time
+    # define the experiment
     args = get_args()
-    exp_info = printing(args, gym.make(args.env_id))
-    start_time = time.time()
-    ep_rews = train(args)
-    end_time = time.time()
-    print(f"TOTAL TRAINING TIME: {end_time - start_time:.2f}s")
-    plot(ep_rews, exp_info)
+    env = make_env(args)
+    agent = TD3_Goal_Agent(env.observation_space, env.action_space, env.action_space.high[0], args)
+    exp_info = printing(args, env)
+    # execute training and/or evaluation phases
+    if args.train:
+        ep_rews = train(args, env, agent)
+        plot(ep_rews, exp_info)
+    if args.eval:
+        evaluate_policy(args, env, agent)

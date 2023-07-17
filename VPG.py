@@ -3,11 +3,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
 from torch.distributions.normal import Normal
-import torch.optim as optim
+from torch.optim import Adam
 import gym
 from gym.spaces import Box, Discrete
 import numpy as np
-from utils import rewards_to_go, get_args, printing, wandb_init
+from utils import get_args, printing, mlp, wandb_init, rewards_to_go, plot
 
 # repeat for number of updates:
 # collect experience until buffer is full: -
@@ -19,23 +19,27 @@ from utils import rewards_to_go, get_args, printing, wandb_init
 # when buffer is full execute VPG update: -
 
 class VPG_Agent(nn.Module):
-    def __init__(self, obs_dim, action_space, hidden_dim):
+    def __init__(self, args, envtask):
         super(VPG_Agent, self).__init__()
-        self.obs_dim = obs_dim
-        self.action_space = action_space
+        self.args = args
+        self.envtask = envtask
+        self.env = self.envtask.env
+        self.obs_space = self.env.observation_space
+        self.obs_dim = self.obs_space.shape[0]
+        self.action_space = self.env.action_space
         if isinstance(self.action_space, Discrete):
             self.act_dim = self.action_space.n
         elif isinstance(self.action_space, Box):
             self.act_dim = self.action_space.shape[0]
-        self.hidden_dim = hidden_dim
-        self.fc1 = nn.Linear(self.obs_dim, self.hidden_dim)
-        self.fc2 = nn.Linear(self.hidden_dim, self.act_dim)
-        self.pi_net = nn.Sequential(
-            nn.Linear(self.obs_dim, self.hidden_dim),
-            nn.Tanh(),
-            nn.Linear(self.hidden_dim, self.act_dim)
-        )
-        self.optimizer = optim.Adam(self.pi_net.parameters(), lr=1e-2)
+        self.hidden_sizes = self.args.hidden_sizes
+        self.run_name = printing(self.args, self.env)
+        self.pi_net = mlp([self.obs_dim] + list(self.hidden_sizes) + [self.act_dim], nn.Tanh)
+        #self.pi_net = nn.Sequential(
+        #    nn.Linear(self.obs_dim, self.hidden_dim),
+        #    nn.Tanh(),
+        #    nn.Linear(self.hidden_dim, self.act_dim)
+        #)
+        self.optimizer = Adam(self.pi_net, lr=1e-2)
 
     def get_policy(self, obs):
         obs = obs.to(torch.float32)
@@ -72,6 +76,36 @@ class VPG_Agent(nn.Module):
         self.optimizer.step()
         return batch_loss
 
+    def step(self, obss, rews, terms, truncs):
+        return
+
+    def train(self):
+
+        if args.wandb:
+            import wandb
+            run = wandb_init(args)
+
+        import time
+        start_time = time.time()
+
+        actions, env_t = agent.step(self.env.reset()[0]), 0
+        while agent.t < args.training_steps:
+            obss, rews, terms, truncs, _ = self.env.step(actions)
+            if (terms or truncs):
+                obss, _ = self.env.reset()
+            env_t += 1
+            # print(f"env_t: {env_t}, agent.T: {agent.t}")
+            assert agent.t == env_t  # to remove
+            actions = agent.step(obss, rews, terms, truncs)
+
+        end_time = time.time()
+        print(f"TRAINING TIME: {end_time - start_time:.2f} seconds")
+
+        if args.wandb:
+            wandb.finish()
+
+        if self.args.plot:
+            plot(self.total_rews_by_ep, self.run_name)
 
 def train(env, agent, args):
 
@@ -95,7 +129,7 @@ def train(env, agent, args):
         batch_obs = []
         batch_acts = []
         batch_rews = []
-        observation = env.reset(seed=args.seed)[0]
+        observation = env.reset()[0]  # env.reset(seed=args.seed)[0]
         t = 0
         ep_rews = []
         # continue to loop in the epoch until buffer is sufficiently filled, then train, and empty buffer for new epoch.
@@ -138,31 +172,11 @@ def train(env, agent, args):
     print(f"Average episode length was: {sum(all_episode_lens) / ep_num:.1f} timesteps")
     return all_episode_rews
 
-def plot(run_name, ep_rews):
-    import matplotlib.pyplot as plt
-    plt.plot(ep_rews)
-    plt.title(run_name)
-    plt.xlabel("Episode")
-    plt.ylabel("Total rewards")
-    plt.show()
 
 if __name__ == "__main__":
-    import time
     args = get_args()
-    env = gym.make(args.env_id, render_mode="rgb_array")
-    agent = VPG_Agent(env.observation_space.shape[0], env.action_space, args.hidden_sizes[0])
-    args.max_ep_steps = env._max_episode_steps
-    args.batch_size = args.num_eps_in_batch * args.max_ep_steps
-    run_name = printing(args, env)
-    if args.wandb:
-        import os
-        import wandb
-        run = wandb_init(args)
-    # env = gym.wrappers.RecordVideo(env, "/home/elliot/DRL_Gym_PyTorch/wandb/videos/")
-    start_time = time.time()
-    all_episode_rews = train(env, agent, args)
-    end_time = time.time()
-    print(f"TRAINING TIME: {end_time - start_time:.2f} seconds")
-    plot(run_name, all_episode_rews)
-    if args.wandb:
-        wandb.finish()
+    from utils import EnvTask
+    envtask = EnvTask(args)
+    agent = VPG_Agent(args, envtask)
+    _ = agent.train()
+    _ = agent.evaluate()

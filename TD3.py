@@ -5,9 +5,9 @@ from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
 import itertools
-import gym
+import gymnasium as gym
 
-from gym.spaces import Box
+from gymnasium.spaces import Box
 from DDPG_base import MLPActorCritic_TD3, DDPG_Buffer
 from utils import get_args, printing, plot
 

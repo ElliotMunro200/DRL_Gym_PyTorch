@@ -5,7 +5,7 @@ from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
 import random
-import gym
+import gymnasium as gym
 
 from gym.spaces import Box
 from DDPG_base import MLPActorCritic_DDPG, DDPG_Buffer

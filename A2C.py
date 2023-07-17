@@ -161,7 +161,8 @@ class A2C_Agent(nn.Module):
         self.act_space = act_space
         self.act_dim = self.act_space.shape
         self.args = args
-        self.h_sizes = args.hidden_sizes
+        size_list = args.hidden_sizes
+        self.h_sizes = tuple(size_list)
         self.device = args.device
         self.ac_master = MLPActorCritic(self.obs_space, self.act_space, hidden_sizes=self.h_sizes)
         with torch.no_grad():
