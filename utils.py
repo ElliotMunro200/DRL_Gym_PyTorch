@@ -35,6 +35,7 @@ def get_args():
     parser.add_argument('--delayed_update_period', type=int, default=2, help='# of critic updates per target+policy updates (default: 2)')
     parser.add_argument('--warmup_period', type=int, default=500, help='# of steps before first update (default: 500)')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
+    parser.add_argument('--alpha', type=float, default=0.2, help='alpha value (default: 0.2)')
     parser.add_argument('--gamma', type=float, default=0.99, help='gamma value (default: 0.99)')
     parser.add_argument('--lambda_', type=float, default=0.90, help='lambda value (default: 0.90)')
     parser.add_argument('--tau', type=float, default=0.995, help='tau value (default: 0.995)')
@@ -163,6 +164,12 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
     env.evaluate = False
     return np.array(rewards), success / eval_episodes
 
+def rewards_to_go(ep_rews):
+    ep_rews_to_go = []
+    for i in range(len(ep_rews)):
+        ep_rews_to_go.append(sum(ep_rews[i:]))
+    return ep_rews_to_go
+
 def wandb_init(args):
     if args.wandb_id == "new":
         args.wandb_id = wandb.util.generate_id()
@@ -179,11 +186,6 @@ def wandb_init(args):
     )
     return run
 
-def rewards_to_go(ep_rews):
-    ep_rews_to_go = []
-    for i in range(len(ep_rews)):
-        ep_rews_to_go.append(sum(ep_rews[i:]))
-    return ep_rews_to_go
 
 def plot(ep_rews, exp_info):
     import matplotlib.pyplot as plt

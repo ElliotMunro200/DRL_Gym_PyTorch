@@ -8,7 +8,7 @@ import itertools
 
 import time
 from gym.spaces import Box
-from DDPG_base_2 import MLP_GoalActorCritic_TD3, DDPG_Buffer
+from PG_goals_base import MLP_GoalActorCritic_TD3, DDPG_Buffer
 from utils import get_args, printing, make_env, Subgoal, evaluate_policy, plot
 
 

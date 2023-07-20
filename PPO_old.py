@@ -4,33 +4,34 @@ from torch.distributions.categorical import Categorical
 from torch.optim import Adam
 import numpy as np
 import gym
-from gym.spaces import Box, Discrete
 
-from utils import get_args, EnvTask, printing
+from utils import get_args
 from GAE import GAE
-from PG_base import MLPActorCritic_PPO
 
 # get batch of experience
 # update policy - clip loss
 # update value function - MSE loss on returns
 
 class PPO_Agent(nn.Module):
-    def __init__(self, args, envtask):
-        super().__init__()
-        self.args = args
-        self.envtask = envtask
-        self.env = self.envtask.env
-        self.obs_space = self.env.observation_space
-        self.obs_dim = self.obs_space.shape[0]
-        self.action_space = self.env.action_space
-        if isinstance(self.action_space, Discrete):
-            self.act_dim = self.action_space.n
-        elif isinstance(self.action_space, Box):
-            self.act_dim = self.action_space.shape[0]
-        self.hidden_sizes = self.args.hidden_sizes
-        self.run_name = printing(self.args, self.env)
-        self.PPO_ac = MLPActorCritic_PPO(self.obs_space, self.action_space, self.hidden_sizes)
-        self.optimizer = Adam(self.PPO_ac.parameters(), lr=1e-2)
+    def __init__(self, obs_dim, act_dim, hidden_dim, args):
+        super(PPO_Agent, self).__init__()
+        self.obs_dim = obs_dim
+        self.act_dim = act_dim
+        self.hidden_dim = hidden_dim
+        self.logits_net = nn.Sequential(
+            nn.Linear(self.obs_dim, self.hidden_dim),
+            nn.Tanh(),
+            nn.Linear(self.hidden_dim, self.act_dim)
+        )
+        self.critic = nn.Sequential(
+            nn.Linear(self.obs_dim, self.hidden_dim),
+            nn.Tanh(),
+            nn.Linear(self.hidden_dim, 1)
+        )
+        self.optimizer = Adam([
+            {'params': self.logits_net.parameters(), 'lr': 1e-2},
+            {'params': self.critic.parameters(), 'lr': 1e-2}
+        ])
         self.clip_param = 0.2
         self.GAE = args.GAE
         print(f"GAE: {self.GAE}")
@@ -61,7 +62,7 @@ class PPO_Agent(nn.Module):
         return batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages
 
     def get_policy(self, obs_tensor):
-        logits = self.PPO_ac.pi(obs_tensor)
+        logits = self.logits_net(obs_tensor)
         policy = Categorical(logits=logits)
         return policy
 
@@ -70,7 +71,7 @@ class PPO_Agent(nn.Module):
         dist = self.get_policy(obs_tensor)
         action = dist.sample()
         logp = dist.log_prob(action)
-        return action.item(), logp.item() #.item()
+        return action.item(), logp.item()
 
     def execute_GAE(self, batch_rews, state_values):
         ep_len = len(batch_rews) # GAE
@@ -95,7 +96,7 @@ class PPO_Agent(nn.Module):
     def update(self):
         batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages = self.get_buffer_data()
         batch_rets = torch.tensor(np.array(self.rewards_to_go()), dtype=torch.float32)
-        state_values = self.PPO_ac.v(batch_obs).squeeze()
+        state_values = self.critic(batch_obs).squeeze()
         if not self.GAE:
             batch_advantages = batch_rets.detach() - state_values.detach()
         elif self.GAE:
@@ -114,10 +115,9 @@ class PPO_Agent(nn.Module):
 
         return loss.mean(), state_values.mean()
 
-def train(args):
-    envtask = EnvTask(args)
-    env = envtask.env
-    agent = PPO_Agent(args, envtask)
+def train(args, env_name='CartPole-v1', hidden_size=32):
+    env = gym.make(env_name)
+    agent = PPO_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size, args)
     max_episodes = 500
     training_rewards_by_episode = []
     for ep in range(max_episodes):

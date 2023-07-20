@@ -3,10 +3,10 @@ import torch.nn as nn
 from torch.distributions.categorical import Categorical
 from torch.optim import Adam
 import numpy as np
-import gym
-from gym.spaces import Box, Discrete
+import gymnasium as gym
+from gymnasium.spaces import Box, Discrete
 
-from utils import get_args, EnvTask, printing
+from utils import get_args, printing
 from GAE import GAE
 from PG_base import MLPActorCritic_PPO
 
@@ -61,7 +61,7 @@ class PPO_Agent(nn.Module):
         return batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages
 
     def get_policy(self, obs_tensor):
-        logits = self.PPO_ac.pi(obs_tensor)
+        logits = self.logits_net(obs_tensor)
         policy = Categorical(logits=logits)
         return policy
 
@@ -70,7 +70,7 @@ class PPO_Agent(nn.Module):
         dist = self.get_policy(obs_tensor)
         action = dist.sample()
         logp = dist.log_prob(action)
-        return action.item(), logp.item() #.item()
+        return action.item(), logp.item()
 
     def execute_GAE(self, batch_rews, state_values):
         ep_len = len(batch_rews) # GAE
@@ -95,7 +95,7 @@ class PPO_Agent(nn.Module):
     def update(self):
         batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages = self.get_buffer_data()
         batch_rets = torch.tensor(np.array(self.rewards_to_go()), dtype=torch.float32)
-        state_values = self.PPO_ac.v(batch_obs).squeeze()
+        state_values = self.critic(batch_obs).squeeze()
         if not self.GAE:
             batch_advantages = batch_rets.detach() - state_values.detach()
         elif self.GAE:
@@ -114,10 +114,9 @@ class PPO_Agent(nn.Module):
 
         return loss.mean(), state_values.mean()
 
-def train(args):
-    envtask = EnvTask(args)
-    env = envtask.env
-    agent = PPO_Agent(args, envtask)
+def train(args, hidden_size=32):
+    env = gym.make(args.env_id)
+    agent = PPO_Agent(env.observation_space.shape[0], env.action_space.n, hidden_size, args)
     max_episodes = 500
     training_rewards_by_episode = []
     for ep in range(max_episodes):

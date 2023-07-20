@@ -5,10 +5,10 @@ from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
 import itertools
-import gymnasium as gym
+import gym
 
-from gymnasium.spaces import Box
-from DDPG_base import MLPActorCritic_TD3, DDPG_Buffer
+from gym.spaces import Box
+from PG_base import MLPActorCritic_TD3, PG_OffPolicy_Buffer
 from utils import get_args, printing, plot
 
 
@@ -29,7 +29,7 @@ class TD3_Agent(nn.Module):
         # Buffer+Rewards lists
         self.batch_size = args.num_steps_in_batch
         self.buffer_size = args.buffer_size
-        self.buffer = DDPG_Buffer(self.obs_dim, self.act_dim, self.batch_size, self.buffer_size)
+        self.buffer = PG_OffPolicy_Buffer(self.obs_dim, self.act_dim, self.batch_size, self.buffer_size)
         self.total_rews_by_ep = []
         # Training params
         self.gamma = args.gamma
@@ -71,6 +71,12 @@ class TD3_Agent(nn.Module):
         for key in Q_weights:
             QTarget_weights[key] = QTarget_weights[key] * self.tau + Q_weights[key] * (1 - self.tau)
         self.TD3_ac_target.q1.load_state_dict(QTarget_weights)
+
+        Q_weights = self.TD3_ac.q2.state_dict()
+        QTarget_weights = self.TD3_ac_target.q2.state_dict()
+        for key in Q_weights:
+            QTarget_weights[key] = QTarget_weights[key] * self.tau + Q_weights[key] * (1 - self.tau)
+        self.TD3_ac_target.q2.load_state_dict(QTarget_weights)
 
         Pi_weights = self.TD3_ac.pi.state_dict()
         PiTarget_weights = self.TD3_ac_target.pi.state_dict()
