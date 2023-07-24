@@ -38,7 +38,7 @@ class AntEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     low = -high
     obs_space = Box(low, high)
 
-    mujoco_env.MujocoEnv.__init__(self, file_path, 5) #, obs_space)
+    mujoco_env.MujocoEnv.__init__(self, file_path, 5, obs_space)
     utils.EzPickle.__init__(self)
 
   @property

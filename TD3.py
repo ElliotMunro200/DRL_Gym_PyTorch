@@ -9,7 +9,7 @@ import gym
 
 from gym.spaces import Box
 from PG_base import MLPActorCritic_TD3, PG_OffPolicy_Buffer
-from utils import get_args, printing, plot
+from utils import get_args, printing, plot, EnvTask
 
 
 class TD3_Agent(nn.Module):
@@ -51,16 +51,19 @@ class TD3_Agent(nn.Module):
         self.n_update = 0
 
     def action_from_obs(self, obs):
-        obs_tensor = torch.from_numpy(obs)
-        mean = self.TD3_ac.pi(obs_tensor).item()
+        obs_tensor = torch.from_numpy(obs).type(torch.float32)
+        mean = self.TD3_ac.pi(obs_tensor).squeeze()
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
-        action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
+        action = torch.clip(mean+noise*0.1, -2.0, 2.0).squeeze()
         return action
 
     def action_select(self, obss):
         if self.ep >= 5:
             with torch.no_grad():
-                action = np.array([self.action_from_obs(obss)])
+                action = self.action_from_obs(obss)
+                if action.ndim == 0: # for MCC-v0 with act-dim of 1 (comes from dim error in action_from_obs)
+                   action = action.unsqueeze(dim=0)
+                action = action.numpy()
         else:
             action = self.act_space.sample()
         return action
@@ -155,27 +158,28 @@ class TD3_Agent(nn.Module):
         return acts
 
 
-def train(args):
-    env = gym.make(args.env_id)
-    agent = TD3_Agent(env.observation_space, env.action_space, env.action_space.high[0], args)
-    actions, env_t = agent.step(env.reset()[0]), 0
+def train(args, env, agent):
+    action, env_t = agent.step(env.reset()[0]), 0
     while agent.t < args.training_steps:
-        obss, rews, terms, truncs, _ = env.step(actions)
+        obss, rews, terms, truncs, _ = env.step(action)
         if (terms or truncs):
             obss, _ = env.reset()
         env_t += 1
         #print(f"env_t: {env_t}, agent.T: {agent.t}")
         assert agent.t == env_t  # to remove
-        actions = agent.step(obss, rews, terms, truncs)
+        action = agent.step(obss, rews, terms, truncs)
     total_rews_by_ep = agent.total_rews_by_ep
     return total_rews_by_ep
 
 if __name__ == "__main__":
     import time
     args = get_args()
-    exp_info = printing(args, gym.make(args.env_id))
+    envtask = EnvTask(args)
+    env = envtask.env
+    agent = TD3_Agent(env.observation_space, env.action_space, env.action_space.high[0], args)
+    exp_info = printing(args, env)
     start_time = time.time()
-    ep_rews = train(args)
+    ep_rews = train(args, env, agent)
     end_time = time.time()
     print(f"TOTAL TRAINING TIME: {end_time - start_time:.2f}s")
     plot(ep_rews, exp_info)

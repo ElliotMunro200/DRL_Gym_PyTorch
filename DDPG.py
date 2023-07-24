@@ -5,7 +5,7 @@ from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
 import random
-import gymnasium as gym
+import gym
 
 from gym.spaces import Box
 from PG_base import MLPActorCritic_DDPG, PG_OffPolicy_Buffer
@@ -43,16 +43,19 @@ class DDPG_Agent(nn.Module):
         self.ep = len(self.total_rews_by_ep)
 
     def action_from_obs(self, obs):
-        obs_tensor = torch.from_numpy(obs)
-        mean = self.DDPG_ac.pi(obs_tensor).item()
+        obs_tensor = torch.from_numpy(obs).type(torch.float32)
+        mean = self.DDPG_ac.pi(obs_tensor).squeeze()
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
-        action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
+        action = torch.clip(mean+noise*0.1, -2.0, 2.0).squeeze()
         return action
 
     def action_select(self, obss):
-        if self.ep >= 5:
+        if self.ep >= 1:
             with torch.no_grad():
-                action = np.array([self.action_from_obs(obss)])
+                action = self.action_from_obs(obss)
+                if action.ndim == 0:  # for MCC-v0 with act-dim of 1 (comes from dim error in action_from_obs)
+                    action = action.unsqueeze(dim=0)
+                action = action.numpy()
         else:
             action = self.act_space.sample()
         return action
@@ -116,15 +119,15 @@ class DDPG_Agent(nn.Module):
 def train(args):
     env = gym.make(args.env_id)
     agent = DDPG_Agent(env.observation_space, env.action_space, args)
-    actions, env_t = agent.step(env.reset()[0]), 0
+    action, env_t = agent.step(env.reset()[0]), 0
     while agent.t < args.training_steps:
-        obss, rews, terms, truncs, _ = env.step(actions)
+        obss, rews, terms, truncs, _ = env.step(action)
         if (terms or truncs):
             obss, _ = env.reset()
         env_t += 1
         #print(f"env_t: {env_t}, agent.T: {agent.t}")
         assert agent.t == env_t  # to remove
-        actions = agent.step(obss, rews, terms, truncs)
+        action = agent.step(obss, rews, terms, truncs)
     total_rews_by_ep = agent.total_rews_by_ep
     return total_rews_by_ep
 

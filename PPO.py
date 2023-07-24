@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.distributions.normal import Normal
 from torch.distributions.categorical import Categorical
 from torch.optim import Adam
 import numpy as np
@@ -53,24 +54,28 @@ class PPO_Agent(nn.Module):
         self.batch_advantages = []
 
     def get_buffer_data(self):
-        batch_obs = torch.tensor(np.array(self.batch_obs))
-        batch_acts = torch.tensor(np.array(self.batch_acts))
-        batch_old_logp = torch.tensor(np.array(self.batch_old_logp))
-        batch_rews = torch.tensor(np.array(self.batch_rews))
-        batch_advantages = torch.tensor(np.array(self.batch_advantages))
+        batch_obs = torch.from_numpy(np.array(self.batch_obs)).type(torch.float32)
+        batch_acts = torch.from_numpy(np.array(self.batch_acts)).type(torch.float32)
+        batch_old_logp = torch.from_numpy(np.array(self.batch_old_logp)).type(torch.float32)
+        batch_rews = torch.from_numpy(np.array(self.batch_rews)).type(torch.float32)
+        batch_advantages = torch.from_numpy(np.array(self.batch_advantages)).type(torch.float32)
         return batch_obs, batch_acts, batch_old_logp, batch_rews, batch_advantages
 
-    def get_policy(self, obs_tensor):
-        logits = self.PPO_ac.pi(obs_tensor)
-        policy = Categorical(logits=logits)
+    def get_policy(self, obs):
+        obs = obs.to(torch.float32)
+        logits = self.PPO_ac.pi(obs)
+        if isinstance(self.action_space, Discrete):
+            policy = Categorical(logits=logits)
+        elif isinstance(self.action_space, Box):
+            policy = Normal(logits, 1)
         return policy
 
     def action_select(self, obs):
         obs_tensor = torch.from_numpy(obs).type(torch.float32)
         dist = self.get_policy(obs_tensor)
         action = dist.sample()
-        logp = dist.log_prob(action)
-        return action.item(), logp.item() #.item()
+        logp = dist.log_prob(action).detach()
+        return action.numpy(), logp.numpy() #.item()
 
     def execute_GAE(self, batch_rews, state_values):
         ep_len = len(batch_rews) # GAE
@@ -104,6 +109,7 @@ class PPO_Agent(nn.Module):
 
         logp = self.get_policy(batch_obs).log_prob(batch_acts)
         ratio = torch.exp(logp - batch_old_logp.detach())
+        batch_advantages = batch_advantages.unsqueeze(dim=1)
         surr1 = ratio * batch_advantages
         surr2 = torch.clamp(ratio, 1 - self.clip_param, 1 + self.clip_param) * batch_advantages
         loss = -torch.min(surr1, surr2) + 0.5 * self.MseLoss(state_values, batch_rets)
@@ -130,6 +136,8 @@ def train(args):
             agent.batch_obs.append(obs)
             agent.batch_acts.append(action)
             agent.batch_old_logp.append(logp)
+            #print(f"LOGP SHAPE: {logp.shape}, LOGP: {logp}")
+            #print(f"ACTION SHAPE: {action.shape}, ACTION TYPE: {type(action)}")
             obs, rew, done, trunc, _ = env.step(action)
             t += 1
             agent.batch_rews.append(rew)
