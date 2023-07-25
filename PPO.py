@@ -124,8 +124,9 @@ def train(args):
     envtask = EnvTask(args)
     env = envtask.env
     agent = PPO_Agent(args, envtask)
-    max_episodes = 500
+    max_episodes = args.num_episodes
     training_rewards_by_episode = []
+    ep_lens = []
     for ep in range(max_episodes):
         agent.empty_buffer()
         obs = env.reset()[0]
@@ -143,9 +144,11 @@ def train(args):
             agent.batch_rews.append(rew)
         episode_rewards = agent.batch_rews
         total_ep_rews = sum(episode_rewards)
+        ep_lens.append(t)
         training_rewards_by_episode.append(total_ep_rews)
         loss_mean, values_mean = agent.update()
         print(f"| Trained Episode {ep} | Rewards: {total_ep_rews:<5} | Ep Len: {t:<3} | Loss: {loss_mean:<5.1f} | Value: {values_mean:.1f} |")
+    print(f"TOTAL STEPS: {sum(ep_lens)}, NUM EPS: {len(ep_lens)}, AVERAGE EP LEN: {sum(ep_lens)/len(ep_lens)}")
     return training_rewards_by_episode
 
 
