@@ -8,7 +8,7 @@ import itertools
 
 import time
 from gym.spaces import Box
-from PG_goals_base import MLP_GoalActorCritic_TD3, DDPG_Buffer
+from PG_goals_base import MLP_GoalActorCritic_TD3, PG_Goal_OffPolicy_Buffer
 from utils import get_args, printing, make_env, Subgoal, evaluate_policy, plot
 
 
@@ -22,7 +22,8 @@ class TD3_Goal_Agent(nn.Module):
         self.act_dim = self.act_space.shape[0]
         self.act_limit = act_limit
         self.subgoal_dim = args.subgoal_dim
-        self.subgoal_space = Subgoal(self.subgoal_dim)
+        self.subgoal = Subgoal(self.subgoal_dim)
+        self.subtask_length = 25
         self.sg = None
         self.args = args
         self.h_sizes = self.args.hidden_sizes
@@ -32,7 +33,7 @@ class TD3_Goal_Agent(nn.Module):
         # Buffer+Rewards lists
         self.batch_size = args.num_steps_in_batch
         self.buffer_size = args.buffer_size
-        self.buffer = DDPG_Buffer(self.obs_dim, self.act_dim, self.batch_size, self.buffer_size)
+        self.buffer = PG_Goal_OffPolicy_Buffer(self.obs_dim, self.subgoal_dim, self.act_dim, self.batch_size, self.buffer_size)
         self.total_rews_by_ep = []
         # Training params
         self.gamma = args.gamma
@@ -53,22 +54,6 @@ class TD3_Goal_Agent(nn.Module):
         self.ep = len(self.total_rews_by_ep)
         self.n_update = 0
 
-    def action_from_obs(self, obs):
-        obs_tensor = torch.from_numpy(obs)
-        goal_tensor = deepcopy(self.sg)
-        mean = self.TD3_ac.pi(obs_tensor, goal_tensor).item()
-        noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
-        action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
-        return action
-
-    def action_select(self, obss):
-        if self.ep >= 5:
-            with torch.no_grad():
-                action = np.array([self.action_from_obs(obss)])
-        else:
-            action = self.act_space.sample()
-        return action
-
     def soft_target_weight_update(self):
         Q_weights = self.TD3_ac.q1.state_dict()
         QTarget_weights = self.TD3_ac_target.q1.state_dict()
@@ -82,21 +67,30 @@ class TD3_Goal_Agent(nn.Module):
             PiTarget_weights[key] = PiTarget_weights[key] * self.tau + Pi_weights[key] * (1 - self.tau)
         self.TD3_ac_target.pi.load_state_dict(PiTarget_weights)
 
+    def after_episode(self):
+        bcs = self.buffer.curr_size
+        ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
+        ep_rew = sum(ep_rews)
+        self.total_rews_by_ep.append(ep_rew)
+        self.ep = len(self.total_rews_by_ep)
+        print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
+        self.ep_t = 0
+
     def update(self):
         data = self.buffer.sample_batch()
-        b_obs, b_acts, b_rews, b_terms, b_obs_2 = data['obs'], data['act'], data['rew'], data['term'], data['obs2']
+        b_obs, b_goals, b_acts, b_rews, b_terms, b_obs_2 = data['obs'], data['subg'], data['act'], data['rew'], data['term'], data['obs2']
 
-        Q1 = self.TD3_ac.q1(b_obs, b_acts)
-        Q2 = self.TD3_ac.q2(b_obs, b_acts)
+        Q1 = self.TD3_ac.q1(b_obs, b_goals, b_acts)
+        Q2 = self.TD3_ac.q2(b_obs, b_goals, b_acts)
 
         with torch.no_grad():
-            Pi_targ = self.TD3_ac_target.pi(b_obs_2)
+            Pi_targ = self.TD3_ac_target.pi(b_obs_2, b_goals)
             epsilon = torch.randn_like(Pi_targ) * self.target_noise
             epsilon = torch.clamp(epsilon, -self.noise_clip, self.noise_clip)
             b_acts_2 = Pi_targ + epsilon
             b_acts_2 = torch.clamp(b_acts_2, -self.act_limit, self.act_limit)
-            Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_acts_2)
-            Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_acts_2)
+            Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_goals, b_acts_2)
+            Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_goals, b_acts_2)
             Q_pi_target = torch.min(Q1_pi_target, Q2_pi_target)
             targets = b_rews + self.gamma * (1 - b_terms.int()) * Q_pi_target
 
@@ -116,7 +110,7 @@ class TD3_Goal_Agent(nn.Module):
                 p.requires_grad = False
 
             self.optimizerPi.zero_grad()
-            PiLoss = -1 * self.TD3_ac.q1(b_obs, self.TD3_ac.pi(b_obs)).mean()
+            PiLoss = -1 * self.TD3_ac.q1(b_obs, b_goals, self.TD3_ac.pi(b_obs, b_goals)).mean()
             PiLoss.backward()
             self.optimizerPi.step()
             with torch.no_grad():
@@ -129,24 +123,31 @@ class TD3_Goal_Agent(nn.Module):
 
         return QLoss
 
-    def before_episode(self):
+    def action_from_obs(self, obs, subg):
+        obs_tensor = torch.from_numpy(obs)
+        subg_tensor = subg
+        mean = self.TD3_ac.pi(obs_tensor, subg_tensor).item()
+        noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
+        action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
+        return action
+
+    def action_select(self, obss, subg):
+        if self.ep >= 5:
+            with torch.no_grad():
+                action = np.array([self.action_from_obs(obss, subg)])
+        else:
+            action = self.act_space.sample()
+        return action
+
+    def subgoal_select(self):
         sg_numpy = self.subgoal.action_space.sample()
         self.sg = torch.from_numpy(sg_numpy)
 
-    def after_episode(self):
-        bcs = self.buffer.curr_size
-        ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
-        ep_rew = sum(ep_rews)
-        self.total_rews_by_ep.append(ep_rew)
-        self.ep = len(self.total_rews_by_ep)
-        print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
-        self.ep_t = 0
-
     def step(self, obss, rews=0.0, terms=False, trunc=False):
-        if self.ep_t == 0:
-            self.before_episode()
-        acts = self.action_select(obss)
-        self.buffer.store(obss, acts, rews, terms)
+        if self.ep_t % self.subtask_length == 0:
+            self.subgoal_select()
+        acts = self.action_select(obss, deepcopy(self.sg))
+        self.buffer.store(obss, deepcopy(self.sg), acts, rews, terms)
         self.t += 1
         self.ep_t += 1
         # only update if buffer is big enough and time to update

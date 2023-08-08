@@ -134,6 +134,36 @@ class DDPG_Buffer():
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in batch.items()}
 
 
+class PG_Goal_OffPolicy_Buffer():
+    def __init__(self, obs_dim, subg_dim, act_dim, batch_size, buffer_size):
+        self.obs_buf = np.zeros(combined_shape(buffer_size, obs_dim), dtype=np.float32)
+        self.subg_buf = np.zeros(combined_shape(buffer_size, subg_dim), dtype=np.float32)
+        self.act_buf = np.zeros(combined_shape(buffer_size, act_dim), dtype=np.float32)
+        self.rew_buf = np.zeros(buffer_size, dtype=np.float32)
+        self.term_buf = np.zeros(buffer_size, dtype=np.float32)
+        self.ptr, self.curr_size = 0, 0
+        self.batch_size, self.max_size = batch_size, buffer_size
+
+    def store(self, obs, subg, act, rew, term):
+        self.obs_buf[self.ptr] = obs
+        self.subg_buf[self.ptr] = subg
+        self.act_buf[self.ptr] = act
+        self.rew_buf[self.ptr] = rew
+        self.term_buf[self.ptr] = term
+        self.ptr = (self.ptr + 1) % self.max_size
+        self.curr_size = min(self.curr_size + 1, self.max_size)
+
+    def sample_batch(self):
+        idxs = np.random.randint(0, self.curr_size - 1, size=self.batch_size)
+        batch = dict(obs=self.obs_buf[idxs],
+                     obs2=self.obs_buf[idxs + 1],
+                     subg=self.subg_buf[idxs],
+                     act=self.act_buf[idxs],
+                     rew=self.rew_buf[idxs + 1],
+                     term=self.term_buf[idxs + 1])
+        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in batch.items()}
+
+
 class MLP_GoalActor(nn.Module):
 
     def __init__(self, obs_dim, goal_dim, act_dim, hidden_sizes, activation, act_limit):
