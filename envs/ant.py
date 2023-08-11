@@ -32,13 +32,14 @@ class AntEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     self._body_com_indices = {}
     self._body_comvel_indices = {}
 
-    from gym.spaces import Box
-    shape = (29,)
-    high = np.inf * np.ones(shape)
-    low = -high
-    obs_space = Box(low, high)
 
-    mujoco_env.MujocoEnv.__init__(self, file_path, 5, obs_space)
+    #from gym.spaces import Box
+    #shape = (29,)
+    #high = np.inf * np.ones(shape)
+    #low = -high
+    #obs_space = Box(low, high)
+
+    mujoco_env.MujocoEnv.__init__(self, file_path, 5)
     utils.EzPickle.__init__(self)
 
   @property

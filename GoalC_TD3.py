@@ -139,13 +139,13 @@ class TD3_Goal_Agent(nn.Module):
             action = self.act_space.sample()
         return action
 
-    def subgoal_select(self):
+    def subgoal_select(self, obss):
         sg_numpy = self.subgoal.action_space.sample()
         self.sg = torch.from_numpy(sg_numpy)
 
     def step(self, obss, rews=0.0, terms=False, trunc=False):
         if self.ep_t % self.subtask_length == 0:
-            self.subgoal_select()
+            self.subgoal_select(obss)
         acts = self.action_select(obss, deepcopy(self.sg))
         self.buffer.store(obss, deepcopy(self.sg), acts, rews, terms)
         self.t += 1
@@ -162,8 +162,9 @@ class TD3_Goal_Agent(nn.Module):
 
 def train(args, env, agent):
     start_training_time = time.time()
-
-    actions, env_t = agent.step(env.reset()[0]), 0
+    obs = env.reset()
+    print(obs)
+    actions, env_t = agent.step(), 0
     while agent.t < args.training_steps:
         obss, rews, terms, truncs, _ = env.step(actions)
         if (terms or truncs):

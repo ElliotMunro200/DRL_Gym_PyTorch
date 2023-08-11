@@ -1,0 +1,7 @@
+name: RLRL
+channels:
+  - defaults
+dependencies:
+  - python==3.10
+  - pyopengl
+prefix: /home/elliot/miniconda3/envs/RLRL
