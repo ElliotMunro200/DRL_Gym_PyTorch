@@ -4,4 +4,3 @@ runs/
 __pycache__/
 *.pt
 *.tar
-*.xml
