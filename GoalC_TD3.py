@@ -16,7 +16,7 @@ class TD3_Goal_Agent(nn.Module):
     def __init__(self, obs_space, act_space, act_limit, args):
         super().__init__()
         self.obs_space = obs_space
-        self.obs_dim = self.obs_space.shape[0]
+        self.obs_dim = self.obs_space.shape[0]+1
         self.act_space = act_space
         assert isinstance(act_space, Box)
         self.act_dim = self.act_space.shape[0]
@@ -27,7 +27,7 @@ class TD3_Goal_Agent(nn.Module):
         self.sg = None
         self.args = args
         self.h_sizes = self.args.hidden_sizes
-        self.TD3_ac = MLP_GoalActorCritic_TD3(self.obs_space, self.act_space, hidden_sizes=self.h_sizes)
+        self.TD3_ac = MLP_GoalActorCritic_TD3(self.obs_dim, self.subgoal_dim, self.act_space, hidden_sizes=self.h_sizes)
         with torch.no_grad():
             self.TD3_ac_target = deepcopy(self.TD3_ac)
         # Buffer+Rewards lists
@@ -78,7 +78,7 @@ class TD3_Goal_Agent(nn.Module):
 
     def update(self):
         data = self.buffer.sample_batch()
-        b_obs, b_goals, b_acts, b_rews, b_terms, b_obs_2 = data['obs'], data['subg'], data['act'], data['rew'], data['term'], data['obs2']
+        b_obs, b_goals, b_acts, b_rews, b_dones, b_obs_2 = data['obs'], data['subg'], data['act'], data['rew'], data['done'], data['obs2']
 
         Q1 = self.TD3_ac.q1(b_obs, b_goals, b_acts)
         Q2 = self.TD3_ac.q2(b_obs, b_goals, b_acts)
@@ -92,7 +92,7 @@ class TD3_Goal_Agent(nn.Module):
             Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_goals, b_acts_2)
             Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_goals, b_acts_2)
             Q_pi_target = torch.min(Q1_pi_target, Q2_pi_target)
-            targets = b_rews + self.gamma * (1 - b_terms.int()) * Q_pi_target
+            targets = b_rews + self.gamma * (1 - b_dones.int()) * Q_pi_target
 
         Q1Loss = self.MseLoss(Q1, targets)
         Q2Loss = self.MseLoss(Q2, targets)
@@ -123,31 +123,31 @@ class TD3_Goal_Agent(nn.Module):
 
         return QLoss
 
-    def action_from_obs(self, obs, subg):
-        obs_tensor = torch.from_numpy(obs)
-        subg_tensor = subg
-        mean = self.TD3_ac.pi(obs_tensor, subg_tensor).item()
+    def action_from_obs(self, obs, subg): # needs to output np.float32
+        obs_tensor = torch.from_numpy(obs).type(torch.float32)
+        subg_tensor = subg.type(torch.float32)
+        mean = self.TD3_ac.pi(obs_tensor, subg_tensor)
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
-        action = torch.clip(mean+noise*0.1, -2.0, 2.0).item()
+        action = torch.clip(mean+noise*0.1, -2.0, 2.0).numpy()
         return action
 
-    def action_select(self, obss, subg):
+    def action_select(self, obs, subg):
         if self.ep >= 5:
             with torch.no_grad():
-                action = np.array([self.action_from_obs(obss, subg)])
+                action = self.action_from_obs(obs, subg)
         else:
             action = self.act_space.sample()
         return action
 
-    def subgoal_select(self, obss):
+    def subgoal_select(self, obs):
         sg_numpy = self.subgoal.action_space.sample()
         self.sg = torch.from_numpy(sg_numpy)
 
-    def step(self, obss, rews=0.0, terms=False, trunc=False):
+    def step(self, obs, rews=0.0, done=False):
         if self.ep_t % self.subtask_length == 0:
-            self.subgoal_select(obss)
-        acts = self.action_select(obss, deepcopy(self.sg))
-        self.buffer.store(obss, deepcopy(self.sg), acts, rews, terms)
+            self.subgoal_select(obs)
+        acts = self.action_select(obs, deepcopy(self.sg))
+        self.buffer.store(obs, deepcopy(self.sg), acts, rews, done)
         self.t += 1
         self.ep_t += 1
         # only update if buffer is big enough and time to update
@@ -155,7 +155,7 @@ class TD3_Goal_Agent(nn.Module):
             # one update for each timestep since last updating
             for _ in range(self.update_period):
                 QLoss = self.update()
-        if (terms or trunc):
+        if done:
             self.after_episode()
         return acts
 
@@ -163,16 +163,17 @@ class TD3_Goal_Agent(nn.Module):
 def train(args, env, agent):
     start_training_time = time.time()
     obs = env.reset()
-    print(obs)
-    actions, env_t = agent.step(), 0
+    obs = obs['observation']
+    actions, env_t = agent.step(obs), 0
     while agent.t < args.training_steps:
-        obss, rews, terms, truncs, _ = env.step(actions)
-        if (terms or truncs):
-            obss, _ = env.reset()
+        obs, rews, done, _ = env.step(actions)
+        if done:
+            obs = env.reset()
+        obs = obs['observation']
         env_t += 1
         #print(f"env_t: {env_t}, agent.T: {agent.t}")
         assert agent.t == env_t  # to remove
-        actions = agent.step(obss, rews, terms, truncs)
+        actions = agent.step(obs, rews, done)
     total_rews_by_ep = agent.total_rews_by_ep
 
     end_training_time = time.time()

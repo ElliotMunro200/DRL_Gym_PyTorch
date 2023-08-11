@@ -88,12 +88,10 @@ class MLPActorCritic_TD3(nn.Module):
 
 class MLP_GoalActorCritic_TD3(nn.Module):
 
-    def __init__(self, observation_space, action_space, hidden_sizes=(256, 256),
+    def __init__(self, obs_dim, goal_dim, action_space, hidden_sizes=(256, 256),
                  activation=nn.ReLU):
         super().__init__()
 
-        obs_dim = observation_space.shape[0]
-        goal_dim = obs_dim
         act_dim = action_space.shape[0]
         act_limit = action_space.high[0]
 
@@ -140,7 +138,7 @@ class PG_Goal_OffPolicy_Buffer():
         self.subg_buf = np.zeros(combined_shape(buffer_size, subg_dim), dtype=np.float32)
         self.act_buf = np.zeros(combined_shape(buffer_size, act_dim), dtype=np.float32)
         self.rew_buf = np.zeros(buffer_size, dtype=np.float32)
-        self.term_buf = np.zeros(buffer_size, dtype=np.float32)
+        self.done_buf = np.zeros(buffer_size, dtype=np.float32)
         self.ptr, self.curr_size = 0, 0
         self.batch_size, self.max_size = batch_size, buffer_size
 
@@ -149,7 +147,7 @@ class PG_Goal_OffPolicy_Buffer():
         self.subg_buf[self.ptr] = subg
         self.act_buf[self.ptr] = act
         self.rew_buf[self.ptr] = rew
-        self.term_buf[self.ptr] = term
+        self.done_buf[self.ptr] = term
         self.ptr = (self.ptr + 1) % self.max_size
         self.curr_size = min(self.curr_size + 1, self.max_size)
 
@@ -160,7 +158,7 @@ class PG_Goal_OffPolicy_Buffer():
                      subg=self.subg_buf[idxs],
                      act=self.act_buf[idxs],
                      rew=self.rew_buf[idxs + 1],
-                     term=self.term_buf[idxs + 1])
+                     done=self.done_buf[idxs + 1])
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in batch.items()}
 
 
