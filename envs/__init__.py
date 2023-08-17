@@ -67,6 +67,8 @@ class EnvWithGoal(object):
             'desired_goal': self.goal,
         }
 
+    # the step function of the currently used EnvWithGoal class.
+    # as soon as count
     def step(self, a):
         obs, _, done, info = self.base_env.step(a)
         reward = self.reward_fn(obs, self.goal)

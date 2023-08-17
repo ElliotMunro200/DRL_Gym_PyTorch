@@ -9,23 +9,27 @@ import itertools
 import time
 from gym.spaces import Box
 from PG_goals_base import MLP_GoalActorCritic_TD3, PG_Goal_OffPolicy_Buffer
-from utils import get_args, printing, make_env, Subgoal, evaluate_policy, plot
+from utils import get_args, printing, make_env, Subgoal, evaluate_policy, plot, wandb_init
 
 
 class TD3_Goal_Agent(nn.Module):
-    def __init__(self, obs_space, act_space, act_limit, args):
+    def __init__(self, args, env):
         super().__init__()
-        self.obs_space = obs_space
+        # args, env inputs
+        self.args = args
+        self.env = env
+        # state, action, goal spaces
+        self.obs_space = env.observation_space
         self.obs_dim = self.obs_space.shape[0]+1
-        self.act_space = act_space
-        assert isinstance(act_space, Box)
+        self.act_space = env.action_space
+        assert isinstance(self.act_space, Box)
         self.act_dim = self.act_space.shape[0]
-        self.act_limit = act_limit
+        self.act_limit = env.action_space.high[0]
         self.subgoal_dim = args.subgoal_dim
         self.subgoal = Subgoal(self.subgoal_dim)
         self.subtask_length = 25
         self.sg = None
-        self.args = args
+        # Networks
         self.h_sizes = self.args.hidden_sizes
         self.TD3_ac = MLP_GoalActorCritic_TD3(self.obs_dim, self.subgoal_dim, self.act_space, hidden_sizes=self.h_sizes)
         with torch.no_grad():
@@ -48,6 +52,8 @@ class TD3_Goal_Agent(nn.Module):
         self.optimizerPi = Adam(self.TD3_ac.pi.parameters(), lr=args.learning_rate)
         self.q_params = itertools.chain(self.TD3_ac.q1.parameters(), self.TD3_ac.q2.parameters())
         self.optimizerQ = Adam(self.q_params, lr=args.learning_rate)
+        # Evaluation params
+        self.evaluate = evaluate_policy(self.args, self.env, self)
         # Step counters
         self.t = 0
         self.ep_t = 0
@@ -67,6 +73,8 @@ class TD3_Goal_Agent(nn.Module):
             PiTarget_weights[key] = PiTarget_weights[key] * self.tau + Pi_weights[key] * (1 - self.tau)
         self.TD3_ac_target.pi.load_state_dict(PiTarget_weights)
 
+    # extracts rewards from the buffer for the past episode and appends the total to the episodic rewards list,
+    # prints the episode rewards, resets episode time counter
     def after_episode(self):
         bcs = self.buffer.curr_size
         ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
@@ -75,8 +83,15 @@ class TD3_Goal_Agent(nn.Module):
         self.ep = len(self.total_rews_by_ep)
         print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
         self.ep_t = 0
+        return ep_rew
 
+    # Updates the TD3_ac (pi, Q1, Q2), with a form of GPI, and then copies softly to TD3_ac_targ.
+    # Common DDPG failure mode is dramatically overestimating Q-values, which TD3 addresses directly in 3 ways.
+    # Use target-policy smoothing, twin critics (for minimum Q value estimate), delayed updates of policy + target nets.
+    # Both Q1 and Q2 are updated with MSELoss on calculated Q-targets - more accurate and self-consistent (from r, Q).
+    # Pi is updated from the loss function L=-Q1(s,g,pi(s,g)) - which is improving Pi for the current Q1.
     def update(self):
+        # pulls a batch of randomly ordered random transition tuples from the buffer
         data = self.buffer.sample_batch()
         b_obs, b_goals, b_acts, b_rews, b_dones, b_obs_2 = data['obs'], data['subg'], data['act'], data['rew'], data['done'], data['obs2']
 
@@ -84,10 +99,10 @@ class TD3_Goal_Agent(nn.Module):
         Q2 = self.TD3_ac.q2(b_obs, b_goals, b_acts)
 
         with torch.no_grad():
-            Pi_targ = self.TD3_ac_target.pi(b_obs_2, b_goals)
-            epsilon = torch.randn_like(Pi_targ) * self.target_noise
+            pi_targ_act = self.TD3_ac_target.pi(b_obs_2, b_goals)
+            epsilon = torch.randn_like(pi_targ_act) * self.target_noise
             epsilon = torch.clamp(epsilon, -self.noise_clip, self.noise_clip)
-            b_acts_2 = Pi_targ + epsilon
+            b_acts_2 = pi_targ_act + epsilon
             b_acts_2 = torch.clamp(b_acts_2, -self.act_limit, self.act_limit)
             Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_goals, b_acts_2)
             Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_goals, b_acts_2)
@@ -143,20 +158,31 @@ class TD3_Goal_Agent(nn.Module):
         sg_numpy = self.subgoal.action_space.sample()
         self.sg = torch.from_numpy(sg_numpy)
 
+    # The logic function/controller of this controller level in the hierarchy. Has multiple functions per step:
+    # 1) subgoal selection; 2) action selection + time increments; 3) storing in buffer;
+    # 4) updating nets (+QLoss logging to W+B); 5) printing episode rewards + local logging (+logging to W+B);
+    # 6) returning selected action back to the loop in the external train() function.
     def step(self, obs, rews=0.0, done=False):
+        # subgoal selection
         if self.ep_t % self.subtask_length == 0:
             self.subgoal_select(obs)
+        # action selection + time increments
         acts = self.action_select(obs, deepcopy(self.sg))
-        self.buffer.store(obs, deepcopy(self.sg), acts, rews, done)
         self.t += 1
         self.ep_t += 1
+        # store transition tuple (s,r,d, g,a)
+        self.buffer.store(obs, rews, done, deepcopy(self.sg), acts)
         # only update if buffer is big enough and time to update
         if (self.buffer.curr_size >= self.warmup_period) and (self.t % self.update_period == 0):
-            # one update for each timestep since last updating
+            # one update for each timestep since last updating, and logging
             for _ in range(self.update_period):
                 QLoss = self.update()
+                if args.wandb:
+                    wandb.log({'loss': QLoss}, step=self.t)
         if done:
-            self.after_episode()
+            ep_rew = self.after_episode()
+            if args.wandb:
+                wandb.log({"episodic reward": ep_rew, "episode number": self.ep})
         return acts
 
 
@@ -164,16 +190,17 @@ def train(args, env, agent):
     start_training_time = time.time()
     obs = env.reset()
     obs = obs['observation']
-    actions, env_t = agent.step(obs), 0
+    action, env_t = agent.step(obs), 0
+    agent.t = 0
     while agent.t < args.training_steps:
-        obs, rews, done, _ = env.step(actions)
+        print(f"agent.T: {agent.t}, env_t: {env_t}, env.count: {env.count}")
+        assert agent.t == env_t == env.count
+        obs, rews, done, _ = env.step(action)
         if done:
             obs = env.reset()
-        obs = obs['observation']
         env_t += 1
-        #print(f"env_t: {env_t}, agent.T: {agent.t}")
-        assert agent.t == env_t  # to remove
-        actions = agent.step(obs, rews, done)
+        obs = obs['observation']
+        action = agent.step(obs, rews, done)
     total_rews_by_ep = agent.total_rews_by_ep
 
     end_training_time = time.time()
@@ -181,15 +208,26 @@ def train(args, env, agent):
 
     return total_rews_by_ep
 
+
 if __name__ == "__main__":
-    # define the experiment
+    # define the experiment: args --> env|task --> agent, and get info about it
     args = get_args()
     env = make_env(args)
-    agent = TD3_Goal_Agent(env.observation_space, env.action_space, env.action_space.high[0], args)
+    agent = TD3_Goal_Agent(args, env)
     exp_info = printing(args, env)
+
+    # logging
+    if args.wandb:
+        import wandb
+        run = wandb_init(args)
+    # env = gym.wrappers.RecordVideo(env, "/home/elliot/DRL_Gym_PyTorch/wandb/videos/")
+
     # execute training and/or evaluation phases
     if args.train:
         ep_rews = train(args, env, agent)
         plot(ep_rews, exp_info)
     if args.eval:
-        evaluate_policy(args, env, agent)
+        agent.evaluate()
+
+    if args.wandb:
+        wandb.finish()
