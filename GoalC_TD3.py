@@ -18,6 +18,7 @@ class TD3_Goal_Agent(nn.Module):
         # args, env inputs
         self.args = args
         self.env = env
+        self.env_max_ep_steps = env._max_episode_steps
         # state, action, goal spaces
         self.obs_space = env.observation_space
         self.obs_dim = self.obs_space.shape[0]+1
@@ -27,7 +28,8 @@ class TD3_Goal_Agent(nn.Module):
         self.act_limit = env.action_space.high[0]
         self.subgoal_dim = args.subgoal_dim
         self.subgoal = Subgoal(self.subgoal_dim)
-        self.subtask_length = 25
+        # testing without changing subgoals
+        self.subtask_length = self.env_max_ep_steps
         self.sg = None
         # Networks
         self.h_sizes = self.args.hidden_sizes
@@ -39,12 +41,13 @@ class TD3_Goal_Agent(nn.Module):
         self.buffer_size = args.buffer_size
         self.buffer = PG_Goal_OffPolicy_Buffer(self.obs_dim, self.subgoal_dim, self.act_dim, self.batch_size, self.buffer_size)
         self.total_rews_by_ep = []
+        self.ep_rew = 0
         # Training params
         self.gamma = args.gamma
         self.tau = args.tau
         self.target_noise = args.target_noise
         self.noise_clip = args.noise_clip
-        self.warmup_period = args.warmup_period
+        self.warmup_last_ep_num = args.warmup_last_ep_num
         self.update_period = args.update_period
         self.delayed_update_period = args.delayed_update_period
         self.MseLoss = nn.MSELoss()
@@ -57,8 +60,10 @@ class TD3_Goal_Agent(nn.Module):
         # Step counters
         self.t = 0
         self.ep_t = 0
-        self.ep = len(self.total_rews_by_ep)
+        self.ep_t_left = self.env_max_ep_steps
         self.n_update = 0
+        self.N_sum_prev_ep_lens = 0
+        self.ep_num = 0
 
     def soft_target_weight_update(self):
         Q_weights = self.TD3_ac.q1.state_dict()
@@ -75,15 +80,13 @@ class TD3_Goal_Agent(nn.Module):
 
     # extracts rewards from the buffer for the past episode and appends the total to the episodic rewards list,
     # prints the episode rewards, resets episode time counter
+    # TODO: check this logic, especially finding ep_rews.
     def after_episode(self):
         bcs = self.buffer.curr_size
         ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
-        ep_rew = sum(ep_rews)
-        self.total_rews_by_ep.append(ep_rew)
-        self.ep = len(self.total_rews_by_ep)
-        print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
-        self.ep_t = 0
-        return ep_rew
+        self.ep_rew = sum(ep_rews)
+        self.total_rews_by_ep.append(self.ep_rew)
+        self.N_sum_prev_ep_lens += self.ep_t
 
     # Updates the TD3_ac (pi, Q1, Q2), with a form of GPI, and then copies softly to TD3_ac_targ.
     # Common DDPG failure mode is dramatically overestimating Q-values, which TD3 addresses directly in 3 ways.
@@ -93,21 +96,22 @@ class TD3_Goal_Agent(nn.Module):
     def update(self):
         # pulls a batch of randomly ordered random transition tuples from the buffer
         data = self.buffer.sample_batch()
-        b_obs, b_goals, b_acts, b_rews, b_dones, b_obs_2 = data['obs'], data['subg'], data['act'], data['rew'], data['done'], data['obs2']
+        b_obs, b_rews, b_dones, b_goals, b_acts = data['obs'], data['rew'], data['done'], data['subg'], data['act']
+        b_obs_2, b_rews_2, b_dones_2, b_goals_2, b_acts_2 = data['obs2'], data['rew2'], data['done2'], data['subg2'], data['act2']
 
         Q1 = self.TD3_ac.q1(b_obs, b_goals, b_acts)
         Q2 = self.TD3_ac.q2(b_obs, b_goals, b_acts)
 
         with torch.no_grad():
-            pi_targ_act = self.TD3_ac_target.pi(b_obs_2, b_goals)
+            pi_targ_act = self.TD3_ac_target.pi(b_obs_2, b_goals_2)
             epsilon = torch.randn_like(pi_targ_act) * self.target_noise
             epsilon = torch.clamp(epsilon, -self.noise_clip, self.noise_clip)
             b_acts_2 = pi_targ_act + epsilon
             b_acts_2 = torch.clamp(b_acts_2, -self.act_limit, self.act_limit)
-            Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_goals, b_acts_2)
-            Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_goals, b_acts_2)
+            Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_goals_2, b_acts_2)
+            Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_goals_2, b_acts_2)
             Q_pi_target = torch.min(Q1_pi_target, Q2_pi_target)
-            targets = b_rews + self.gamma * (1 - b_dones.int()) * Q_pi_target
+            targets = b_rews_2 + self.gamma * (1 - b_dones_2.int()) * Q_pi_target
 
         Q1Loss = self.MseLoss(Q1, targets)
         Q2Loss = self.MseLoss(Q2, targets)
@@ -147,7 +151,7 @@ class TD3_Goal_Agent(nn.Module):
         return action
 
     def action_select(self, obs, subg):
-        if self.ep >= 5:
+        if self.ep_num >= 5:
             with torch.no_grad():
                 action = self.action_from_obs(obs, subg)
         else:
@@ -163,44 +167,55 @@ class TD3_Goal_Agent(nn.Module):
     # 4) updating nets (+QLoss logging to W+B); 5) printing episode rewards + local logging (+logging to W+B);
     # 6) returning selected action back to the loop in the external train() function.
     def step(self, obs, rews=0.0, done=False):
+        # TODO: updating step counters.
+        self.ep_t_left = obs[-1]
+        self.ep_t = self.env_max_ep_steps - self.ep_t_left
+        if self.ep_t == 0:
+            self.ep_num += 1
+        self.t = self.ep_t + self.N_sum_prev_ep_lens
+        print(f"Time left in episode: {self.ep_t_left}")
         # subgoal selection
         if self.ep_t % self.subtask_length == 0:
             self.subgoal_select(obs)
         # action selection + time increments
         acts = self.action_select(obs, deepcopy(self.sg))
-        self.t += 1
-        self.ep_t += 1
-        # store transition tuple (s,r,d, g,a)
+        # store timestep tuple (s,r,d,g,a) on every single step.
+        # TODO: test MCMC idea of throwing away warmup episode data from buffer after training on it.
         self.buffer.store(obs, rews, done, deepcopy(self.sg), acts)
-        # only update if buffer is big enough and time to update
-        if (self.buffer.curr_size >= self.warmup_period) and (self.t % self.update_period == 0):
+        # update after some number of episodes of filling buffer if it is a time in the current episode to do so.
+        # TODO: test the effect of the warmup data collection length on training.
+        if (self.ep_num > self.warmup_last_ep_num) and (self.ep_t % self.update_period == 0):
             # one update for each timestep since last updating, and logging
             for _ in range(self.update_period):
                 QLoss = self.update()
                 if args.wandb:
                     wandb.log({'loss': QLoss}, step=self.t)
         if done:
-            ep_rew = self.after_episode()
+            self.after_episode()
+            print(f"| Episode {self.ep_num:<3} done | Steps: {self.ep_t:<3} "
+                  f"| Rewards: {self.ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
             if args.wandb:
-                wandb.log({"episodic reward": ep_rew, "episode number": self.ep})
+                wandb.log({"episodic reward": self.ep_rew, "episode number": self.ep_num})
         return acts
 
 
 def train(args, env, agent):
     start_training_time = time.time()
-    obs = env.reset()
-    obs = obs['observation']
-    action, env_t = agent.step(obs), 0
-    agent.t = 0
-    while agent.t < args.training_steps:
-        print(f"agent.T: {agent.t}, env_t: {env_t}, env.count: {env.count}")
-        assert agent.t == env_t == env.count
-        obs, rews, done, _ = env.step(action)
+    done = True
+    while env.t < args.training_steps:
+        # every env.reset() and env.step() is counted as a timestep and so increments env.step_count by 1.
         if done:
-            obs = env.reset()
-        env_t += 1
-        obs = obs['observation']
+            obs, rews, done, _ = env.reset()
+            obs = obs['observation']
+        elif not done:
+            obs, rews, done, _ = env.step(action)
+            obs = obs['observation']
+        # agent saves (s,r,d,g,a) timestep data to the buffer within agent.step() every time.
+        # agent observes ep_t_left = obs[-1] and then calculates -> ep_t -> ep_num -> t.
+        # at the end of the episode N_sum_prev_full_ep_lens is updated by ep_t.
         action = agent.step(obs, rews, done)
+        print(f"agent.T: {agent.t}, env.t: {env.t}")
+        assert agent.t == env.t
     total_rews_by_ep = agent.total_rews_by_ep
 
     end_training_time = time.time()

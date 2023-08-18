@@ -151,16 +151,28 @@ class PG_Goal_OffPolicy_Buffer():
         self.ptr = (self.ptr + 1) % self.max_size
         self.curr_size = min(self.curr_size + 1, self.max_size)
 
+    # TODO: test also updating the termination timesteps manually.
     def sample_batch(self):
-        # indexes are in the range (0, curr_size-2) because randint excludes the max given from the values returned.
-        idxs = np.random.randint(0, self.curr_size - 1, size=self.batch_size)
-        batch = dict(obs=self.obs_buf[idxs],
-                     obs2=self.obs_buf[idxs + 1],
-                     subg=self.subg_buf[idxs],
-                     act=self.act_buf[idxs],
-                     rew=self.rew_buf[idxs + 1],
-                     done=self.done_buf[idxs + 1])
-        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in batch.items()}
+        # removing termination timesteps from selection
+        indxs = np.arange(0, self.curr_size)
+        done_indxs = np.where(self.done_buf)
+        done_mask = np.isin(indxs, done_indxs)
+        indxs = indxs[~done_mask]
+        indxs = np.random.choice(indxs, size=self.batch_size)
+        timestep_1 = dict(obs=self.obs_buf[indxs],
+                          rew=self.rew_buf[indxs],
+                          done=self.done_buf[indxs],
+                          subg=self.subg_buf[indxs],
+                          act=self.act_buf[indxs])
+        # extra logic here if also updating termination states
+        timestep_2 = dict(obs2=self.obs_buf[indxs+1],
+                          rew2=self.rew_buf[indxs+1],
+                          done2=self.done_buf[indxs+1],
+                          subg2=self.subg_buf[indxs+1],
+                          act2=self.act_buf[indxs+1])
+        timestep_double = timestep_1.copy()
+        timestep_double.update(timestep_2)
+        return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in timestep_double.items()}
 
 
 class MLP_GoalActor(nn.Module):

@@ -33,7 +33,7 @@ def get_args():
     parser.add_argument('--buffer_size', type=int, default=1000000, help='# off-policy buffer size (default: 1e6)')
     parser.add_argument('--update_period', type=int, default=10, help='# of steps per update (default: 10)')
     parser.add_argument('--delayed_update_period', type=int, default=2, help='# of critic updates per target+policy updates (default: 2)')
-    parser.add_argument('--warmup_period', type=int, default=500, help='# of steps before first update (default: 500)')
+    parser.add_argument('--warmup_last_ep_num', type=int, default=0, help='# number of last episode to use for warmup')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
     parser.add_argument('--alpha', type=float, default=0.2, help='alpha value (default: 0.2)')
     parser.add_argument('--gamma', type=float, default=0.99, help='gamma value (default: 0.99)')

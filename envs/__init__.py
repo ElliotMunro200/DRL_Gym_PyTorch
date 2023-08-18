@@ -46,7 +46,7 @@ class EnvWithGoal(object):
         self.reward_fn = get_reward_fn(env_name)
         self.goal = None
         self.distance_threshold = 5
-        self.count = 0
+        self.t = -1
         self.state_dim = self.base_env.observation_space.shape[0] + 1
         self.action_dim = self.base_env.action_space.shape[0]
         self._max_episode_steps = 500
@@ -58,28 +58,30 @@ class EnvWithGoal(object):
         # self.viewer_setup()
         self.goal_sample_fn = get_goal_sample_fn(self.env_name, self.evaluate)
         obs = self.base_env.reset()
-        self.count = 0
+        self.t += 1
+        self.time_rem = self._max_episode_steps
         self.goal = self.goal_sample_fn()
         return {
             # add timestep
-            'observation': np.r_[obs.copy(), self.count], 
+            'observation': np.r_[obs.copy(), self.time_rem],
             'achieved_goal': obs[:2],
             'desired_goal': self.goal,
         }
 
     # the step function of the currently used EnvWithGoal class.
-    # as soon as count
+    # concats the base_env obs with time_rem to get time-gnostic states as necessary for finite-horizon MDPs.
     def step(self, a):
         obs, _, done, info = self.base_env.step(a)
         reward = self.reward_fn(obs, self.goal)
-        self.count += 1
+        self.t += 1
+        self.time_rem -= 1
         next_obs = {
             # add timestep
-            'observation': np.r_[obs.copy(), self.count],
+            'observation': np.r_[obs.copy(), self.time_rem],
             'achieved_goal': obs[:2],
             'desired_goal': self.goal,
         }
-        return next_obs, reward, done or self.count >= self._max_episode_steps, info
+        return next_obs, reward, (done or self.time_rem == 0), info
 
     def render(self):
         self.base_env.render()
