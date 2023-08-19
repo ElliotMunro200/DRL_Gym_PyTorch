@@ -57,7 +57,7 @@ class TD3_Goal_Agent(nn.Module):
         self.q_params = itertools.chain(self.TD3_ac.q1.parameters(), self.TD3_ac.q2.parameters())
         self.optimizerQ = Adam(self.q_params, lr=args.learning_rate)
         # Evaluation params
-        self.evaluate = evaluate_policy(self.args, self.env, self)
+        self.evaluate = evaluate_policy
         # Step counters
         self.t = 0
         self.ep_t = 0
@@ -87,7 +87,7 @@ class TD3_Goal_Agent(nn.Module):
         ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
         self.ep_rew = sum(ep_rews)
         self.total_rews_by_ep.append(self.ep_rew)
-        self.N_sum_prev_ep_lens += self.ep_t
+        self.N_sum_prev_ep_lens += (self.ep_t + 1)
 
     # Updates the TD3_ac (pi, Q1, Q2), with a form of GPI, and then copies softly to TD3_ac_targ.
     # Common DDPG failure mode is dramatically overestimating Q-values, which TD3 addresses directly in 3 ways.
@@ -145,7 +145,7 @@ class TD3_Goal_Agent(nn.Module):
 
     def action_from_obs(self, obs, subg): # needs to output np.float32
         obs_tensor = torch.from_numpy(obs).type(torch.float32)
-        subg_tensor = subg.type(torch.float32)
+        subg_tensor = torch.from_numpy(subg).type(torch.float32)
         mean = self.TD3_ac.pi(obs_tensor, subg_tensor)
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
         action = torch.clip(mean+noise*0.1, -2.0, 2.0).numpy()
@@ -160,8 +160,8 @@ class TD3_Goal_Agent(nn.Module):
         return action
 
     def subgoal_select(self, obs):
-        sg_numpy = self.subgoal.action_space.sample()
-        self.sg = torch.from_numpy(sg_numpy)
+        #self.sg = self.subgoal.action_space.sample()
+        self.sg = deepcopy(self.fg)
 
     # The logic function/controller of this controller level in the hierarchy. Has multiple functions per step:
     # 1) subgoal selection; 2) action selection + time increments; 3) storing in buffer;
@@ -169,12 +169,12 @@ class TD3_Goal_Agent(nn.Module):
     # 6) returning selected action back to the loop in the external train() function.
     def step(self, obs, rews=0.0, done=False):
         # TODO: updating step counters.
-        self.ep_t_left = obs[-1]
+        self.ep_t_left = int(obs[-1])
         self.ep_t = self.env_max_ep_steps - self.ep_t_left
         if self.ep_t == 0:
             self.ep_num += 1
         self.t = self.ep_t + self.N_sum_prev_ep_lens
-        print(f"Time left in episode: {self.ep_t_left}")
+        print(f"ep_t_left: {self.ep_t_left} | ep_t: {self.ep_t} | t: {self.t} | N_sum: {self.N_sum_prev_ep_lens}")
         # subgoal selection
         if self.ep_t % self.subtask_length == 0:
             self.subgoal_select(obs)
@@ -206,8 +206,10 @@ def train(args, env, agent):
     while env.t < args.training_steps:
         # every env.reset() and env.step() is counted as a timestep and so increments env.step_count by 1.
         if done:
-            obs, rews, done, _ = env.reset()
+            obs, rews, done = env.reset()
+            agent.fg = obs['desired_goal']
             obs = obs['observation']
+
         elif not done:
             obs, rews, done, _ = env.step(action)
             obs = obs['observation']
@@ -215,7 +217,7 @@ def train(args, env, agent):
         # agent observes ep_t_left = obs[-1] and then calculates -> ep_t -> ep_num -> t.
         # at the end of the episode N_sum_prev_full_ep_lens is updated by ep_t.
         action = agent.step(obs, rews, done)
-        print(f"agent.T: {agent.t}, env.t: {env.t}")
+        print(f"agent.t: {agent.t}, env.t: {env.t}")
         assert agent.t == env.t
     total_rews_by_ep = agent.total_rews_by_ep
 
@@ -243,7 +245,7 @@ if __name__ == "__main__":
         ep_rews = train(args, env, agent)
         plot(ep_rews, exp_info)
     if args.eval:
-        agent.evaluate()
+        agent.evaluate(args, env, agent, render=True, save_video=True)
 
     if args.wandb:
         wandb.finish()

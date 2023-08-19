@@ -12,9 +12,9 @@ def get_goal_sample_fn(env_name, evaluate):
         # we use the commented out goal sampling function.    The uncommented
         # one is only used for training. TODO: check if evaluate variable should take value from args.eval or not
         if evaluate:
-            return lambda: np.array([0., 16.])
+            return lambda: np.array([8., 0.]) #np.array([0., 16.])
         else:
-            return lambda: np.random.uniform((-4, -4), (20, 20))
+            return lambda: np.array([8., 0.]) #np.random.uniform((-4, -4), (20, 20))
     elif env_name == 'AntPush':
         return lambda: np.array([0., 19.])
     elif env_name == 'AntFall':
@@ -49,7 +49,11 @@ class EnvWithGoal(object):
         self.t = -1
         self.state_dim = self.base_env.observation_space.shape[0] + 1
         self.action_dim = self.base_env.action_space.shape[0]
-        self._max_episode_steps = 500
+        self._max_episode_steps = 499
+        #self.reward_range = (-1000.0, 1000.0)
+        self.reward_range = self.base_env.reward_range
+        self.metadata = self.base_env.metadata
+        self.spec = self.base_env.spec
 
     def seed(self, seed):
         self.base_env.seed(seed)
@@ -61,12 +65,13 @@ class EnvWithGoal(object):
         self.t += 1
         self.time_rem = self._max_episode_steps
         self.goal = self.goal_sample_fn()
-        return {
+        next_obs = {
             # add timestep
             'observation': np.r_[obs.copy(), self.time_rem],
             'achieved_goal': obs[:2],
             'desired_goal': self.goal,
         }
+        return next_obs, 0.0, False
 
     # the step function of the currently used EnvWithGoal class.
     # concats the base_env obs with time_rem to get time-gnostic states as necessary for finite-horizon MDPs.

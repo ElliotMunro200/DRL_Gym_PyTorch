@@ -1,5 +1,6 @@
 wandb/
 runs/
+video/
 .idea/
 __pycache__/
 *.pt

@@ -122,23 +122,27 @@ class Subgoal(object):
         self.action_space = SubgoalActionSpace(dim)
         self.action_dim = self.action_space.shape[0]
 
+# Run evaluation of current agent policy for some number of episodes with option to render and/or save videos.
 def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video=False, sleep=-1):
+    # wrapping env with automatic video saving of rendered video if wanting to save rendered videos.
     if save_video:
         from OpenGL import GL
         env = gym.wrappers.Monitor(env, directory='video',
                                    write_upon_reset=True, force=True, resume=True, mode='evaluation')
         render = False
 
+    # setting up evaluation
     success = 0
     rewards = []
+    # changing the training time final goal distribution (full square) to the evaluation goal distribution (0,16).
     env.evaluate = True
+    # loop over episodes
     for e in range(eval_episodes):
-        obs = env.reset()
+        obs, r, d = env.reset()
         fg = obs['desired_goal']
         s = obs['observation']
         done = False
         reward_episode_sum = 0
-        step = 0
 
         agent.fg = fg
 
@@ -148,19 +152,20 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
             if sleep > 0:
                 time.sleep(sleep)
 
-            a, r, n_s, done = agent.step(s, env, step)
+            a = agent.action_select(s,fg)
+            n_s, r, done, _ = env.step(a)
             reward_episode_sum += r
 
             s = n_s
-            step += 1
-            agent.end_step()
+
+        # If done, find whether episode success or fail in reaching final goal by calculating the Euclidean error.
         else:
             error = np.sqrt(np.sum(np.square(fg - s[:2])))
-            print('Goal, Curr: (%02.2f, %02.2f, %02.2f, %02.2f)     Error:%.2f' % (fg[0], fg[1], s[0], s[1], error))
+            print(f"Goal: ({fg[0]:.2f}, {fg[1]:.2f}) | Curr: ({s[0]:.2f}, {s[1]:.2f}) | Error: {error:.2f}")
             rewards.append(reward_episode_sum)
             success += 1 if error <= 5 else 0
-            agent.end_episode(e)
 
+    # reverting to the training time final goal distribution (full square) from the evaluation goal distribution (0,16).
     env.evaluate = False
     return np.array(rewards), success / eval_episodes
 
