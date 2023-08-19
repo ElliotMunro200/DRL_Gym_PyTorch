@@ -31,6 +31,7 @@ class TD3_Goal_Agent(nn.Module):
         # testing without changing subgoals
         self.subtask_length = self.env_max_ep_steps
         self.sg = None
+        self.fg = None
         # Networks
         self.h_sizes = self.args.hidden_sizes
         self.TD3_ac = MLP_GoalActorCritic_TD3(self.obs_dim, self.subgoal_dim, self.act_space, hidden_sizes=self.h_sizes)

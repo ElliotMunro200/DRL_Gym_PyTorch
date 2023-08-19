@@ -140,7 +140,7 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
         reward_episode_sum = 0
         step = 0
 
-        agent.set_final_goal(fg)
+        agent.fg = fg
 
         while not done:
             if render:
