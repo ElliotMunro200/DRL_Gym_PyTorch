@@ -23,25 +23,26 @@ def get_args():
     # General Arguments
     parser.add_argument('-env', '--env_id', type=str, default="CartPole-v1", help='The RL environment (default: CartPole-v1)')
     parser.add_argument('--algo', type=str, default="VPG", help='The RL agent (default: VPG)')
-    parser.add_argument('-hs', '--hidden_sizes', nargs='+', type=int, default=[32, 32], help='The agent hidden size (default: 32)')
+    parser.add_argument('-hs', '--hidden_sizes', nargs='+', type=int, default=[300, 300], help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
+    parser.add_argument('-t', '--training_steps', type=int, default=20000, help='# of total training steps (default: 10000)')
+    parser.add_argument('--buffer_size', type=int, default=1000000, help='# off-policy buffer size (default: 1e6)')
     parser.add_argument('-ne', '--num_episodes', type=int, default=50, help='Number of episodes (default: 50)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
-    parser.add_argument('-nsb', '--num_steps_in_batch', type=int, default=50, help='# of steps before updating (default: 50)')
-    parser.add_argument('-t', '--training_steps', type=int, default=20000, help='# of total training steps (default: 10000)')
-    parser.add_argument('--buffer_size', type=int, default=1000000, help='# off-policy buffer size (default: 1e6)')
-    parser.add_argument('--update_period', type=int, default=10, help='# of steps per update (default: 10)')
+    parser.add_argument('-up', '--update_period', type=int, default=10, help='# of steps per update (default: 10)')
+    parser.add_argument('-bs', '--batch_size', type=int, default=50, help='# batch_size (default: 50)')
     parser.add_argument('--delayed_update_period', type=int, default=2, help='# of critic updates per target+policy updates (default: 2)')
-    parser.add_argument('--warmup_last_ep_num', type=int, default=0, help='# number of last episode to use for warmup')
+    parser.add_argument('--training_first_ep_num', type=int, default=5, help='# episode number to start training on')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
     parser.add_argument('--alpha', type=float, default=0.2, help='alpha value (default: 0.2)')
     parser.add_argument('--gamma', type=float, default=0.99, help='gamma value (default: 0.99)')
     parser.add_argument('--lambda_', type=float, default=0.90, help='lambda value (default: 0.90)')
-    parser.add_argument('--tau', type=float, default=0.995, help='tau value (default: 0.995)')
-    parser.add_argument('-lr', '--learning_rate', type=float, default=1e-3, help='optimizer lr value (default: 1e-3)')
-    parser.add_argument('--target_noise', type=float, default=0.2, help='noise added to target actions (default: 0.2)')
-    parser.add_argument('--noise_clip', type=float, default=0.5, help='target action noise clip value (default: 0.5)')
+    parser.add_argument('--tau', type=float, default=0.005, help='tau value (default: 0.995)')
+    parser.add_argument('-alr', '--actor_learning_rate', type=float, default=1e-3, help='alr value (default: 1e-3)')
+    parser.add_argument('-clr', '--critic_learning_rate', type=float, default=1e-4, help='clr value (default: 1e-4)')
+    parser.add_argument('--target_noise', type=float, default=1.0, help='noise added to target actions (default: 0.2)')
+    parser.add_argument('--noise_clip', type=float, default=1.0, help='target action noise clip value (default: 0.5)')
     parser.add_argument('--subgoal_dim', default=15, type=int)
     # Experiment Execution Arguments
     parser.add_argument('--train', action='store_true', default=False, help='trains the agent on the supplied env')
@@ -66,12 +67,12 @@ def printing(args, env):
     print(f"env.observation_space.high: {env.observation_space.high}")
     print(f"env.observation_space.low: {env.observation_space.low}")
     if isinstance(env.action_space, Discrete):
-        print(f"env Discrete shape: {env.action_space.shape}, num actions: {env.action_space.n}")
+        print(f"action space Discrete shape: {env.action_space.shape}, num discrete actions: {env.action_space.n}")
     if isinstance(env.action_space, Box):
-        print(f"env Box shape: {env.action_space.shape[0]}")
+        print(f"action space Box shape: {env.action_space.shape[0]} | action space high: {env.action_space.high[0]}")
     print(f"env.observation_space.shape[0]: {env.observation_space.shape[0]}")
     print(f"env._max_episode_steps: {env._max_episode_steps}")
-    run_name = f"{args.env_id}, {args.algo}, hidden_sizes={args.hidden_sizes}, training steps={args.training_steps}, batch_size={args.num_steps_in_batch}"
+    run_name = f"{args.env_id}, {args.algo}, hidden_sizes={args.hidden_sizes}, training steps={args.training_steps}, batch_size={args.batch_size}"
     print(f"RUN_NAME: {run_name}")
     return run_name
 
@@ -108,6 +109,7 @@ class EnvTask:
 
 class SubgoalActionSpace(object):
     def __init__(self, dim):
+        # positions (and orientations) of ant torso and joints.
         limits = np.array([-10, -10, -0.5, -1, -1, -1, -1,
                     -0.5, -0.3, -0.5, -0.3, -0.5, -0.3, -0.5, -0.3])
         self.shape = (dim,1)
@@ -152,22 +154,22 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
             if sleep > 0:
                 time.sleep(sleep)
 
-            a = agent.action_select(s,fg)
+            a = agent.action_select(s, fg)
             n_s, r, done, _ = env.step(a)
             reward_episode_sum += r
-
+            n_s = n_s['observation']
             s = n_s
 
         # If done, find whether episode success or fail in reaching final goal by calculating the Euclidean error.
         else:
             error = np.sqrt(np.sum(np.square(fg - s[:2])))
-            print(f"Goal: ({fg[0]:.2f}, {fg[1]:.2f}) | Curr: ({s[0]:.2f}, {s[1]:.2f}) | Error: {error:.2f}")
+            print(f"Goal (x,y): ({fg[0]:.2f}, {fg[1]:.2f}) | End (x,y): ({s[0]:.2f}, {s[1]:.2f}) | Error: {error:.2f}")
             rewards.append(reward_episode_sum)
             success += 1 if error <= 5 else 0
 
     # reverting to the training time final goal distribution (full square) from the evaluation goal distribution (0,16).
     env.evaluate = False
-    return np.array(rewards), success / eval_episodes
+    return np.round(np.array(rewards), 0), success / eval_episodes
 
 def rewards_to_go(ep_rews):
     ep_rews_to_go = []
@@ -199,3 +201,14 @@ def plot(ep_rews, exp_info):
     plt.ylabel("Total Rewards")
     plt.xlabel("Episode")
     plt.show()
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'

@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.signal
 
+import time
 import torch
 import torch.nn as nn
 
@@ -154,7 +155,8 @@ class PG_Goal_OffPolicy_Buffer():
     # TODO: test also updating the termination timesteps manually.
     def sample_batch(self):
         # removing termination timesteps from selection
-        indxs = np.arange(0, self.curr_size)
+        #start = time.time()
+        indxs = np.arange(0, self.curr_size - 1)
         done_indxs = np.where(self.done_buf)
         done_mask = np.isin(indxs, done_indxs)
         indxs = indxs[~done_mask]
@@ -172,6 +174,10 @@ class PG_Goal_OffPolicy_Buffer():
                           act2=self.act_buf[indxs+1])
         timestep_double = timestep_1.copy()
         timestep_double.update(timestep_2)
+        #print(indxs, indxs+1)
+        #print(np.vstack((timestep_double['done'], timestep_double['done2'])))
+        #end = time.time()
+        #print(f"TIME {end-start}")
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in timestep_double.items()}
 
 

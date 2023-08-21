@@ -66,10 +66,10 @@ class AntEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         reward_survive=survive_reward)
 
   def _get_obs(self):
-    # No cfrc observation
+    # If all qpos exposed, default=True, then also get torso (x,y) in obs.
     if self._expose_all_qpos:
       obs = np.concatenate([
-          self.data.qpos.flat[:15],  # Ensures only ant obs.
+          self.data.qpos.flat[:15],
           self.data.qvel.flat[:14],
       ])
     else:

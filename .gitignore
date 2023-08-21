@@ -5,3 +5,4 @@ video/
 __pycache__/
 *.pt
 *.tar
+*.TXT

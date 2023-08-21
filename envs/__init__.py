@@ -53,6 +53,8 @@ class EnvWithGoal(object):
         #self.reward_range = (-1000.0, 1000.0)
         self.reward_range = self.base_env.reward_range
         self.metadata = self.base_env.metadata
+        self.metadata = {'render.modes': ['human', 'rgb_array']}
+        print(self.metadata)
         self.spec = self.base_env.spec
 
     def seed(self, seed):
@@ -67,7 +69,7 @@ class EnvWithGoal(object):
         self.goal = self.goal_sample_fn()
         next_obs = {
             # add timestep
-            'observation': np.r_[obs.copy(), self.time_rem],
+            'observation': np.r_[obs.copy(), self.goal, self.time_rem],
             'achieved_goal': obs[:2],
             'desired_goal': self.goal,
         }
@@ -82,14 +84,14 @@ class EnvWithGoal(object):
         self.time_rem -= 1
         next_obs = {
             # add timestep
-            'observation': np.r_[obs.copy(), self.time_rem],
+            'observation': np.r_[obs.copy(), self.goal, self.time_rem],
             'achieved_goal': obs[:2],
             'desired_goal': self.goal,
         }
         return next_obs, reward, (done or self.time_rem == 0), info
 
-    def render(self):
-        self.base_env.render()
+    def render(self, mode):
+        self.base_env.render(mode=mode)
 
     def get_image(self):
         self.render()
