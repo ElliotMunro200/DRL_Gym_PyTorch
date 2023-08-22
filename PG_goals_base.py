@@ -156,9 +156,12 @@ class PG_Goal_OffPolicy_Buffer():
     def sample_batch(self):
         # removing termination timesteps from selection
         #start = time.time()
+        # all indexes
         indxs = np.arange(0, self.curr_size - 1)
+        # find where dones are in the buffer and make a mask
         done_indxs = np.where(self.done_buf)
         done_mask = np.isin(indxs, done_indxs)
+        # apply mask to full index array to remove dones from available first steps in the transition
         indxs = indxs[~done_mask]
         indxs = np.random.choice(indxs, size=self.batch_size)
         timestep_1 = dict(obs=self.obs_buf[indxs],

@@ -26,7 +26,7 @@ def get_args():
     parser.add_argument('-hs', '--hidden_sizes', nargs='+', type=int, default=[300, 300], help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
     parser.add_argument('-t', '--training_steps', type=int, default=20000, help='# of total training steps (default: 10000)')
-    parser.add_argument('--buffer_size', type=int, default=1000000, help='# off-policy buffer size (default: 1e6)')
+    parser.add_argument('--buffer_size', type=int, default=100000, help='# off-policy buffer size (default: 1e6)')
     parser.add_argument('-ne', '--num_episodes', type=int, default=50, help='Number of episodes (default: 50)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
@@ -165,7 +165,7 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
             error = np.sqrt(np.sum(np.square(fg - s[:2])))
             print(f"Goal (x,y): ({fg[0]:.2f}, {fg[1]:.2f}) | End (x,y): ({s[0]:.2f}, {s[1]:.2f}) | Error: {error:.2f}")
             rewards.append(reward_episode_sum)
-            success += 1 if error <= 5 else 0
+            success += 1 if error <= 1 else 0
 
     # reverting to the training time final goal distribution (full square) from the evaluation goal distribution (0,16).
     env.evaluate = False
