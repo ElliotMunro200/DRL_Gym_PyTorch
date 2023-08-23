@@ -93,8 +93,9 @@ class TD3_Goal_Agent(nn.Module):
     # prints the episode rewards, resets episode time counter
     # TODO: check this logic, especially finding ep_rews.
     def after_episode(self):
-        bcs = self.buffer.curr_size
-        ep_rews = self.buffer.rew_buf[(bcs-(self.ep_t+1)):bcs]
+        # slicing most recent rewards from the reward buffer, taking into account cyclic deque index ptr.
+        index = self.buffer.ptr if self.buffer.ptr > 0 else self.buffer.curr_size
+        ep_rews = self.buffer.rew_buf[(index-(self.ep_t+1)):index]
         self.ep_rew = sum(ep_rews)
         self.total_rews_by_ep.append(self.ep_rew)
         self.N_sum_prev_ep_lens += (self.ep_t + 1)
@@ -204,9 +205,11 @@ class TD3_Goal_Agent(nn.Module):
         # TODO: test MCMC idea of throwing away warmup episode data from buffer after training on it.
         self.buffer.store(obs, rews, done, deepcopy(self.sg), acts)
 
-        # update after some number of episodes of filling buffer if it is a time in the current episode to do so.
+        # update from specified first training episode number (just filling buffer with random actions before) if also:
+        # not in the first steps of training, and the specified period of time has elapsed since the last update.
         # TODO: test the effect of the warmup data collection length on training.
-        if (self.ep_num >= self.training_first_ep_num) and (self.t > 0) and (self.ep_t % self.update_period == 0):
+        if (self.ep_num >= self.training_first_ep_num) and \
+                (self.t >= self.update_period) and ((self.ep_t+1) % self.update_period == 0):
             # one update for each timestep since last updating, and logging
             for _ in range(self.update_period):
                 self.update()
