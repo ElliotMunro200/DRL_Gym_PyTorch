@@ -26,7 +26,7 @@ def get_args():
     parser.add_argument('-hs', '--hidden_sizes', nargs='+', type=int, default=[300, 300], help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
     parser.add_argument('-t', '--training_steps', type=int, default=20000, help='# of total training steps (default: 10000)')
-    parser.add_argument('--buffer_size', type=int, default=500, help='# off-policy buffer size (default: 1e6)')
+    parser.add_argument('-b', '--buffer_size', type=int, default=100000, help='# off-policy buffer size (default: 1e6)')
     parser.add_argument('-ne', '--num_episodes', type=int, default=50, help='Number of episodes (default: 50)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')

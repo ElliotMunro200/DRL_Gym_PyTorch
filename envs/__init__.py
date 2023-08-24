@@ -12,9 +12,9 @@ def get_goal_sample_fn(env_name, evaluate):
         # we use the commented out goal sampling function.    The uncommented
         # one is only used for training. TODO: check if evaluate variable should take value from args.eval or not
         if evaluate:
-            return lambda: np.array([8., 0.]) #np.array([0., 16.])
+            return lambda: np.array([0., 16.]) #np.array([0., 16.])
         else:
-            return lambda: np.array([8., 0.]) #np.random.uniform((-4, -4), (20, 20))
+            return lambda: np.array([0., 16.]) #np.random.uniform((-4, -4), (20, 20))
     elif env_name == 'AntPush':
         return lambda: np.array([0., 19.])
     elif env_name == 'AntFall':
@@ -49,7 +49,7 @@ class EnvWithGoal(object):
         self.t = -1
         self.state_dim = self.base_env.observation_space.shape[0] + 1
         self.action_dim = self.base_env.action_space.shape[0]
-        self._max_episode_steps = 99
+        self._max_episode_steps = 299
         #self.reward_range = (-1000.0, 1000.0)
         self.reward_range = self.base_env.reward_range
         self.metadata = self.base_env.metadata
