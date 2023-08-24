@@ -25,6 +25,7 @@ class TD3_Goal_Agent(nn.Module):
         self.obs_dim = self.obs_space.shape[0]+2+1
         self.act_space = env.action_space
         assert isinstance(self.act_space, Box)
+        # Ant: 2 joints per leg, 4 legs -> act dim = 8
         self.act_dim = self.act_space.shape[0]
         self.act_limit = env.action_space.high[0]
         self.subgoal_dim = args.subgoal_dim
@@ -274,7 +275,7 @@ if __name__ == "__main__":
         if args.plot:
             plot(ep_rews, exp_info)
     if args.eval:
-        rewards_array, success_rate = agent.evaluate(args, env, agent, render=False, save_video=False)
+        rewards_array, success_rate = agent.evaluate(args, env, agent, render=True, save_video=True)
         print(f"{bcolors.OKGREEN}Eval rewards: {rewards_array} | Success rate: {success_rate}{bcolors.ENDC}")
 
     if args.wandb:
