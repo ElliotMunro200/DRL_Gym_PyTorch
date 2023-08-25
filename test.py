@@ -61,3 +61,37 @@ def train(args, env, agent):
         # agent observes ep_t_left = obs[-1] and then calculates -> ep_t -> ep_num -> t.
         # at the end of the episode N_sum_prev_full_ep_lens is updated by ep_t.
         action = agent.step(obs, rews, done)
+
+
+# 4 module controller architecture - executed by higher-level policy
+
+from copy import deepcopy
+import torch.nn as nn
+class GTD3_Controller(nn.Module):
+    def __init__(self, args):
+        self.args = args
+        # The AC module
+        self.GTD3_ac = GTD3_ac(self.args)
+        # The replay buffer module
+        self.buffer = Buffer_GC_OffPolicy_LowLevel(self.args)
+        # The WM module
+        self.WM = WM_GC_LowLevel(self.args)
+
+    def update(self):
+        pass
+
+    # Logic sub-controller - controls the whole Controller
+    def step(self, obs, goal, rews, done):
+        # update step counters
+
+        # action selection (specifically action_from_obs, depends on off-policy algo type)
+        acts = self.action_select(obs, goal)
+
+        # buffer storage
+        self.buffer.store(obs, rews, done, goal, acts)
+
+        # possible update (specifically Q+pi Loss functions used, depends on off-policy algo type)
+        self.update()
+
+        # possible after-episode function (reward counting + counter iteration) + logging
+        self.after_episode()

@@ -12,7 +12,7 @@ from PG_goals_base import MLP_GoalActorCritic_TD3, PG_Goal_OffPolicy_Buffer
 from utils import get_args, printing, make_env, Subgoal, evaluate_policy, plot, wandb_init, bcolors
 
 
-class TD3_Goal_Agent(nn.Module):
+class GTD3_Agent(nn.Module):
     def __init__(self, args, env):
         super().__init__()
         # args, env inputs
@@ -199,7 +199,7 @@ class TD3_Goal_Agent(nn.Module):
         # subgoal selection
         if self.ep_t % self.subtask_length == 0:
             self.subgoal_select(obs)
-        # action selection + time increments
+        # action selection
         acts = self.action_select(obs, deepcopy(self.sg))
 
         # store timestep tuple (s,r,d,g,a) on every single step.
@@ -260,7 +260,7 @@ if __name__ == "__main__":
     # define the experiment: args --> env|task --> agent, and get info about it
     args = get_args()
     env = make_env(args)
-    agent = TD3_Goal_Agent(args, env)
+    agent = GTD3_Agent(args, env)
     exp_info = printing(args, env)
 
     # logging
@@ -275,7 +275,7 @@ if __name__ == "__main__":
         if args.plot:
             plot(ep_rews, exp_info)
     if args.eval:
-        rewards_array, success_rate = agent.evaluate(args, env, agent, render=True, save_video=True)
+        rewards_array, success_rate = agent.evaluate(args, env, agent)
         print(f"{bcolors.OKGREEN}Eval rewards: {rewards_array} | Success rate: {success_rate}{bcolors.ENDC}")
 
     if args.wandb:

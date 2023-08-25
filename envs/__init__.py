@@ -39,7 +39,7 @@ def success_fn(last_reward):
 
 
 class EnvWithGoal(object):
-    def __init__(self, base_env, env_name, eval=False):
+    def __init__(self, base_env, env_name, max_ep_steps, eval=False):
         self.base_env = base_env
         self.env_name = env_name
         self.evaluate = eval
@@ -49,7 +49,7 @@ class EnvWithGoal(object):
         self.t = -1
         self.state_dim = self.base_env.observation_space.shape[0] + 1
         self.action_dim = self.base_env.action_space.shape[0]
-        self._max_episode_steps = 99
+        self._max_episode_steps = max_ep_steps
         #self.reward_range = (-1000.0, 1000.0)
         self.reward_range = self.base_env.reward_range
         self.metadata = self.base_env.metadata
