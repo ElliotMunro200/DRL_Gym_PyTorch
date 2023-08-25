@@ -51,10 +51,12 @@ def get_args():
     parser.add_argument('--eval', action='store_true', default=False, help='evaluates the agent on the supplied env')
     parser.add_argument('--render', action='store_true', default=False, help='renders eval episodes')
     parser.add_argument('--save_video', action='store_true', default=False, help='saves rendered eval episodes')
+    parser.add_argument('-tg', '--train_goal', nargs='+', type=float, default=[8., 0.], help='Training time goal')
+    parser.add_argument('-eg', '--eval_goal', nargs='+', type=float, default=[8., 0.], help='Evaluation time goal')
     parser.add_argument('--n_env', type=int, default=2, help='# number of parallel env processes (default: 2)')
     parser.add_argument('--cuda', action='store_true', default=False, help='enables CUDA training')
     parser.add_argument('--wandb', action='store_true', default=False, help='enables WandB experiment tracking')
-    parser.add_argument('--wandb_project_name', type=str, default="DRL_Gym_PyTorch", help="the WandB's project name")
+    parser.add_argument('-wpn', '--wandb_project_name', type=str, default="DRL_Gym_PyTorch", help="the WandB's project name")
     parser.add_argument('--wandb_entity', type=str, default=None, help="the entity (team) of WandB's project")
     parser.add_argument('--wandb_resume', type=str, default="allow", help="Resume setting. auto, auto-resume without id given; allow, requires give previous run id or starts a new run; must, requires id and crashes if not the same as a previous run, ensuring resuming.")
     parser.add_argument('--wandb_id', type=str, default="new", help="use WandB auto id generation or user-provided id.")
@@ -82,7 +84,7 @@ def printing(args, env):
 
 def make_env(args):
     if args.env_id in ["AntMaze", "AntPush", "AntFall"]:
-        env = EnvWithGoal(create_maze_env(args.env_id), args.env_id, eval=args.eval)
+        env = EnvWithGoal(create_maze_env(args.env_id), args.env_id, args.max_ep_steps, args.train_goal, args.eval_goal, eval=args.eval)
     else:
         env = gym.make(args.env_id)
     return env
@@ -103,7 +105,7 @@ class EnvTask:
         if self.args.env_id in ["AntMaze", "AntPush", "AntFall"]:
             from utils import EnvWithGoal
             from envs.create_maze_env import create_maze_env
-            env = EnvWithGoal(create_maze_env(self.args.env_id), self.args.env_id, self.args.max_ep_steps, eval=self.args.eval)
+            env = EnvWithGoal(create_maze_env(self.args.env_id), self.args.env_id, self.args.max_ep_steps, self.args.train_goal, self.args.eval_goal, eval=self.args.eval)
         else:
             import gym
             env = gym.make(self.args.env_id)

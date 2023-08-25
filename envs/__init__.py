@@ -6,15 +6,15 @@ import argparse
 import envs.create_maze_env
 
 
-def get_goal_sample_fn(env_name, evaluate):
+def get_goal_sample_fn(env_name, evaluate, train_goal, eval_goal):
     if env_name == 'AntMaze':
         # NOTE: When evaluating (i.e. the metrics shown in the paper)
         # we use the commented out goal sampling function.    The uncommented
         # one is only used for training. TODO: check if evaluate variable should take value from args.eval or not
         if evaluate:
-            return lambda: np.array([0., 16.]) #np.array([0., 16.])
+            return lambda: np.array(eval_goal) #np.array([0., 16.])
         else:
-            return lambda: np.array([0., 16.]) #np.random.uniform((-4, -4), (20, 20))
+            return lambda: np.array(train_goal) #np.random.uniform((-4, -4), (20, 20))
     elif env_name == 'AntPush':
         return lambda: np.array([0., 19.])
     elif env_name == 'AntFall':
@@ -39,17 +39,19 @@ def success_fn(last_reward):
 
 
 class EnvWithGoal(object):
-    def __init__(self, base_env, env_name, max_ep_steps, eval=False):
+    def __init__(self, base_env, env_name, max_ep_steps, train_goal, eval_goal, eval=False):
         self.base_env = base_env
         self.env_name = env_name
         self.evaluate = eval
+        self._max_episode_steps = max_ep_steps
+        self.train_goal = train_goal
+        self.eval_goal = eval_goal
         self.reward_fn = get_reward_fn(env_name)
         self.goal = None
         self.distance_threshold = 5
         self.t = -1
         self.state_dim = self.base_env.observation_space.shape[0] + 1
         self.action_dim = self.base_env.action_space.shape[0]
-        self._max_episode_steps = max_ep_steps
         #self.reward_range = (-1000.0, 1000.0)
         self.reward_range = self.base_env.reward_range
         self.metadata = self.base_env.metadata
@@ -62,7 +64,7 @@ class EnvWithGoal(object):
 
     def reset(self):
         # self.viewer_setup()
-        self.goal_sample_fn = get_goal_sample_fn(self.env_name, self.evaluate)
+        self.goal_sample_fn = get_goal_sample_fn(self.env_name, self.evaluate, self.train_goal, self.eval_goal)
         obs = self.base_env.reset()
         self.t += 1
         self.time_rem = self._max_episode_steps
