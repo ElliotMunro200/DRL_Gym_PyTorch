@@ -4,6 +4,7 @@ import scipy.signal
 import time
 import torch
 import torch.nn as nn
+from copy import deepcopy
 
 
 def combined_shape(length, shape=None):
@@ -134,7 +135,7 @@ class DDPG_Buffer():
 
 # default max buffer size is 1,000,000.
 class PG_Goal_OffPolicy_Buffer():
-    def __init__(self, obs_dim, subg_dim, act_dim, batch_size, buffer_size):
+    def __init__(self, obs_dim, subg_dim, act_dim, batch_size, buffer_size, update_s_term):
         self.obs_buf = np.zeros(combined_shape(buffer_size, obs_dim), dtype=np.float32)
         self.rew_buf = np.zeros(buffer_size, dtype=np.float32)
         self.done_buf = np.zeros(buffer_size, dtype=np.float32)
@@ -142,6 +143,7 @@ class PG_Goal_OffPolicy_Buffer():
         self.act_buf = np.zeros(combined_shape(buffer_size, act_dim), dtype=np.float32)
         self.ptr, self.curr_size = 0, 0
         self.batch_size, self.max_size = batch_size, buffer_size
+        self.update_s_term = update_s_term
 
     def store(self, obs, rew, done, subg, act):
         self.obs_buf[self.ptr] = obs
@@ -154,33 +156,39 @@ class PG_Goal_OffPolicy_Buffer():
 
     # TODO: test also updating the termination timesteps manually.
     def sample_batch(self):
-        # removing termination timesteps from selection
-        #start = time.time()
         # all indexes
         indxs = np.arange(0, self.curr_size - 1)
-        # find where dones are in the buffer and make a mask
-        done_indxs = np.where(self.done_buf)
-        done_mask = np.isin(indxs, done_indxs)
-        # apply mask to full index array to remove dones from available first steps in the transition
-        indxs = indxs[~done_mask]
+
+        # if not wanting to manually update Q(s_terminal,.), apply dones mask to indexes before sampling.
+        if not self.update_s_term:
+            # find where dones are in the buffer and make a mask
+            done_indxs = np.where(self.done_buf)
+            done_mask = np.isin(indxs, done_indxs)
+            # apply mask to full index array to remove dones from available first steps in the transition
+            indxs = indxs[~done_mask]
+
+        # final available timestep indexes
         indxs = np.random.choice(indxs, size=self.batch_size)
         timestep_1 = dict(obs=self.obs_buf[indxs],
                           rew=self.rew_buf[indxs],
                           done=self.done_buf[indxs],
                           subg=self.subg_buf[indxs],
                           act=self.act_buf[indxs])
-        # extra logic here if also updating termination states
-        timestep_2 = dict(obs2=self.obs_buf[indxs+1],
-                          rew2=self.rew_buf[indxs+1],
-                          done2=self.done_buf[indxs+1],
-                          subg2=self.subg_buf[indxs+1],
-                          act2=self.act_buf[indxs+1])
+
+        # if updating Q(s_term,a) manually, then for every True in d, d' must also be True for target values to be = 0.
+        done_next = deepcopy(self.done_buf[indxs + 1])
+        if self.update_s_term:
+            sample_done_indxs = np.where(self.done_buf[indxs])
+            done_next[sample_done_indxs] = 1.
+
+        timestep_2 = dict(obs2=self.obs_buf[indxs + 1],
+                          rew2=self.rew_buf[indxs + 1],
+                          done2=done_next,
+                          subg2=self.subg_buf[indxs + 1],
+                          act2=self.act_buf[indxs + 1])
+
         timestep_double = timestep_1.copy()
         timestep_double.update(timestep_2)
-        #print(indxs, indxs+1)
-        #print(np.vstack((timestep_double['done'], timestep_double['done2'])))
-        #end = time.time()
-        #print(f"TIME {end-start}")
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in timestep_double.items()}
 
 

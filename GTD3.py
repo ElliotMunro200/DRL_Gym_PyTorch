@@ -42,7 +42,8 @@ class GTD3_Agent(nn.Module):
         # Buffer+Rewards lists
         self.batch_size = args.batch_size
         self.buffer_size = args.buffer_size
-        self.buffer = PG_Goal_OffPolicy_Buffer(self.obs_dim, self.subgoal_dim, self.act_dim, self.batch_size, self.buffer_size)
+        self.update_s_term = args.update_s_term
+        self.buffer = PG_Goal_OffPolicy_Buffer(self.obs_dim, self.subgoal_dim, self.act_dim, self.batch_size, self.buffer_size, self.update_s_term)
         self.total_rews_by_ep = []
         self.ep_rew = 0
         # Training params
@@ -112,20 +113,16 @@ class GTD3_Agent(nn.Module):
         data = self.buffer.sample_batch()
         b_obs, b_rews, b_dones, b_goals, b_acts = data['obs'], data['rew'], data['done'], data['subg'], data['act']
         b_obs_2, b_rews_2, b_dones_2, b_goals_2, b_acts_2 = data['obs2'], data['rew2'], data['done2'], data['subg2'], data['act2']
-        #print(f"A2 buffer: {b_acts_2[0]}")
 
-        # Q1 and Q2 vals from buffer for updating parameters of
+        # Q1 and Q2 vals from buffer for updating parameters of Q.
         Q1 = self.TD3_ac.q1(b_obs, b_goals, b_acts)
         Q2 = self.TD3_ac.q2(b_obs, b_goals, b_acts)
 
         with torch.no_grad():
             pi_targ_act = self.TD3_ac_target.pi(b_obs_2, b_goals_2)
-            #print(f"pi_targ_act: {pi_targ_act[0]}")
             epsilon = torch.randn_like(pi_targ_act) * self.target_noise
             b_acts_2 = pi_targ_act + epsilon
-            #print(f"A2 target sum: {b_acts_2[0]}")
             b_acts_2 = torch.clip(b_acts_2, -self.act_limit, self.act_limit)
-            #print(f"A2 target clip: {b_acts_2[0]}")
             Q1_pi_target = self.TD3_ac_target.q1(b_obs_2, b_goals_2, b_acts_2)
             Q2_pi_target = self.TD3_ac_target.q2(b_obs_2, b_goals_2, b_acts_2)
             Q_pi_target = torch.min(Q1_pi_target, Q2_pi_target)
