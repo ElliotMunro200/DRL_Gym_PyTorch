@@ -90,7 +90,7 @@ class EnvWithGoal(object):
         }
         return next_obs, reward, (done or self.time_rem == 0), info
 
-    def render(self, mode):
+    def render(self, mode="human"):
         self.base_env.render(mode=mode)
 
     def get_image(self):
