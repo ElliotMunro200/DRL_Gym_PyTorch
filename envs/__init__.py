@@ -12,9 +12,9 @@ def get_goal_sample_fn(env_name, evaluate):
         # we use the commented out goal sampling function.    The uncommented
         # one is only used for training. TODO: check if evaluate variable should take value from args.eval or not
         if evaluate:
-            return lambda: np.array([8., 0.]) #np.array([0., 16.])
+            return lambda: np.array([0., 16.]) #np.array([0., 16.])
         else:
-            return lambda: np.array([8., 0.]) #np.random.uniform((-4, -4), (20, 20))
+            return lambda: np.array([0., 16.]) #np.random.uniform((-4, -4), (20, 20))
     elif env_name == 'AntPush':
         return lambda: np.array([0., 19.])
     elif env_name == 'AntFall':
@@ -39,7 +39,7 @@ def success_fn(last_reward):
 
 
 class EnvWithGoal(object):
-    def __init__(self, base_env, env_name, eval=False):
+    def __init__(self, base_env, env_name, max_ep_steps, eval=False):
         self.base_env = base_env
 
         self.env_name = env_name
@@ -50,7 +50,7 @@ class EnvWithGoal(object):
         self.t = -1
         self.state_dim = self.base_env.observation_space.shape[0] + 1
         self.action_dim = self.base_env.action_space.shape[0]
-        self._max_episode_steps = 499
+        self._max_episode_steps = max_ep_steps
         #self.reward_range = (-1000.0, 1000.0)
         self.reward_range = self.base_env.reward_range
         self.metadata = self.base_env.metadata
@@ -91,7 +91,7 @@ class EnvWithGoal(object):
         }
         return next_obs, reward, (done or self.time_rem == 0), info
 
-    def render(self, mode):
+    def render(self, mode="human"):
         self.base_env.render(mode=mode)
 
     def get_image(self):

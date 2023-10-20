@@ -26,14 +26,15 @@ def get_args():
     parser.add_argument('-hs', '--hidden_sizes', nargs='+', type=int, default=[300, 300], help='The agent hidden size (default: 32)')
     parser.add_argument('--seed', type=int, default=1, help='Random seed (default: 1)')
     parser.add_argument('-t', '--training_steps', type=int, default=20000, help='# of total training steps (default: 10000)')
-    parser.add_argument('--buffer_size', type=int, default=1000000, help='# off-policy buffer size (default: 1e6)')
+    parser.add_argument('-mes', '--max_ep_steps', type=int, default=299, help='# of total training steps (default: 10000)')
+    parser.add_argument('-b', '--buffer_size', type=int, default=100000, help='# off-policy buffer size (default: 1e6)')
     parser.add_argument('-ne', '--num_episodes', type=int, default=50, help='Number of episodes (default: 50)')
     parser.add_argument('-nb', '--num_batches', type=int, default=50, help='Number of batches/epochs (default: 50)')
     parser.add_argument('--num_eps_in_batch', type=int, default=4, help='# eps of warmup pre training (default: 4)')
     parser.add_argument('-up', '--update_period', type=int, default=10, help='# of steps per update (default: 10)')
     parser.add_argument('-bs', '--batch_size', type=int, default=50, help='# batch_size (default: 50)')
     parser.add_argument('--delayed_update_period', type=int, default=2, help='# of critic updates per target+policy updates (default: 2)')
-    parser.add_argument('--training_first_ep_num', type=int, default=5, help='# episode number to start training on')
+    parser.add_argument('-tfe', '--training_first_ep_num', type=int, default=5, help='# episode number to start training on')
     parser.add_argument('--GAE', action='store_true', default=False, help='enables use of GAE advantage estimation')
     parser.add_argument('--alpha', type=float, default=0.2, help='alpha value (default: 0.2)')
     parser.add_argument('--gamma', type=float, default=0.99, help='gamma value (default: 0.99)')
@@ -43,11 +44,13 @@ def get_args():
     parser.add_argument('-clr', '--critic_learning_rate', type=float, default=1e-4, help='clr value (default: 1e-4)')
     parser.add_argument('--target_noise', type=float, default=1.0, help='noise added to target actions (default: 0.2)')
     parser.add_argument('--noise_clip', type=float, default=1.0, help='target action noise clip value (default: 0.5)')
-    parser.add_argument('--subgoal_dim', default=15, type=int)
+    parser.add_argument('-sd', '--subgoal_dim', default=15, type=int)
     # Experiment Execution Arguments
     parser.add_argument('--train', action='store_true', default=False, help='trains the agent on the supplied env')
     parser.add_argument('--plot', action='store_true', default=False, help='plot the rewards gained in training')
     parser.add_argument('--eval', action='store_true', default=False, help='evaluates the agent on the supplied env')
+    parser.add_argument('--render', action='store_true', default=False, help='renders eval episodes')
+    parser.add_argument('--save_video', action='store_true', default=False, help='saves rendered eval episodes')
     parser.add_argument('--n_env', type=int, default=2, help='# number of parallel env processes (default: 2)')
     parser.add_argument('--cuda', action='store_true', default=False, help='enables CUDA training')
     parser.add_argument('--wandb', action='store_true', default=False, help='enables WandB experiment tracking')
@@ -100,7 +103,7 @@ class EnvTask:
         if self.args.env_id in ["AntMaze", "AntPush", "AntFall"]:
             from utils import EnvWithGoal
             from envs.create_maze_env import create_maze_env
-            env = EnvWithGoal(create_maze_env(self.args.env_id), self.args.env_id, eval=self.args.eval)
+            env = EnvWithGoal(create_maze_env(self.args.env_id), self.args.env_id, self.args.max_ep_steps, eval=self.args.eval)
         else:
             import gym
             env = gym.make(self.args.env_id)
@@ -125,9 +128,9 @@ class Subgoal(object):
         self.action_dim = self.action_space.shape[0]
 
 # Run evaluation of current agent policy for some number of episodes with option to render and/or save videos.
-def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video=False, sleep=-1):
+def evaluate_policy(args, env, agent, eval_episodes=10, sleep=-1):
     # wrapping env with automatic video saving of rendered video if wanting to save rendered videos.
-    if save_video:
+    if args.save_video:
         from OpenGL import GL
         env = gym.wrappers.Monitor(env, directory='video',
                                    write_upon_reset=True, force=True, resume=True, mode='evaluation')
@@ -149,7 +152,7 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
         agent.fg = fg
 
         while not done:
-            if render:
+            if args.render:
                 env.render()
             if sleep > 0:
                 time.sleep(sleep)
@@ -165,7 +168,7 @@ def evaluate_policy(args, env, agent, eval_episodes=10, render=False, save_video
             error = np.sqrt(np.sum(np.square(fg - s[:2])))
             print(f"Goal (x,y): ({fg[0]:.2f}, {fg[1]:.2f}) | End (x,y): ({s[0]:.2f}, {s[1]:.2f}) | Error: {error:.2f}")
             rewards.append(reward_episode_sum)
-            success += 1 if error <= 5 else 0
+            success += 1 if error <= 1 else 0
 
     # reverting to the training time final goal distribution (full square) from the evaluation goal distribution (0,16).
     env.evaluate = False
