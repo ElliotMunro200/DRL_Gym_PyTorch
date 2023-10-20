@@ -41,6 +41,7 @@ def success_fn(last_reward):
 class EnvWithGoal(object):
     def __init__(self, base_env, env_name, eval=False):
         self.base_env = base_env
+
         self.env_name = env_name
         self.evaluate = eval
         self.reward_fn = get_reward_fn(env_name)
