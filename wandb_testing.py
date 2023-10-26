@@ -5,7 +5,7 @@ import torch.optim as optim
 
 PROJECT_NAME = 'pytorch-resume-run'
 CHECKPOINT_PATH = 'checkpoint.pt'
-N_EPOCHS = 100
+N_EPOCHS = 10
 
 # Dummy data
 X = torch.randn(64, 8, requires_grad=True)
@@ -27,7 +27,7 @@ if run_type == "new":
 elif run_type == "resuming":
     wandb_id = "xm30rlyx"
 
-run = wandb.init(project=PROJECT_NAME, id=wandb_id)
+run = wandb.init(project=PROJECT_NAME, id=wandb_id, resume="must")
 print(f"RESUMING: {bool(wandb.run.resumed)}")
 if wandb.run.resumed:
     checkpoint = torch.load(wandb.restore(CHECKPOINT_PATH))
