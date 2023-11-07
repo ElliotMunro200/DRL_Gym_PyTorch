@@ -5,9 +5,9 @@ from copy import deepcopy
 from torch.distributions.normal import Normal
 import numpy as np
 import itertools
-import gym
+import gymnasium as gym
 
-from gym.spaces import Box
+from gymnasium.spaces import Box
 from PG_base import MLPActorCritic_TD3, PG_OffPolicy_Buffer
 from utils import get_args, printing, plot, EnvTask
 
@@ -27,7 +27,7 @@ class TD3_Agent(nn.Module):
         with torch.no_grad():
             self.TD3_ac_target = deepcopy(self.TD3_ac)
         # Buffer+Rewards lists
-        self.batch_size = args.num_steps_in_batch
+        self.batch_size = args.batch_size
         self.buffer_size = args.buffer_size
         self.buffer = PG_OffPolicy_Buffer(self.obs_dim, self.act_dim, self.batch_size, self.buffer_size)
         self.total_rews_by_ep = []
@@ -36,14 +36,14 @@ class TD3_Agent(nn.Module):
         self.tau = args.tau
         self.target_noise = args.target_noise
         self.noise_clip = args.noise_clip
-        self.warmup_period = args.warmup_period
+        self.warmup_period = args.training_first_ep_num * args.max_ep_steps
         self.update_period = args.update_period
         self.delayed_update_period = args.delayed_update_period
         self.MseLoss = nn.MSELoss()
         self.last_Q_loss = 100000
-        self.optimizerPi = Adam(self.TD3_ac.pi.parameters(), lr=args.learning_rate)
+        self.optimizerPi = Adam(self.TD3_ac.pi.parameters(), lr=args.actor_learning_rate)
         self.q_params = itertools.chain(self.TD3_ac.q1.parameters(), self.TD3_ac.q2.parameters())
-        self.optimizerQ = Adam(self.q_params, lr=args.learning_rate)
+        self.optimizerQ = Adam(self.q_params, lr=args.critic_learning_rate)
         # Step counters
         self.t = 0
         self.ep_t = 0
@@ -54,7 +54,7 @@ class TD3_Agent(nn.Module):
         obs_tensor = torch.from_numpy(obs).type(torch.float32)
         mean = self.TD3_ac.pi(obs_tensor).squeeze()
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
-        action = torch.clip(mean+noise*0.1, -2.0, 2.0).squeeze()
+        action = torch.clip(mean+noise*0.1, -1.0, 1.0).squeeze()
         return action
 
     def action_select(self, obss):

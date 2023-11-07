@@ -40,7 +40,7 @@ class chain_oscillator():
 
     def new_x(self):
         # calculating new x values from newly updated r and theta. Recording in x_rec.
-        self.x = self.r * (1 + np.cos(self.O))
+        self.x = self.r * (np.cos(self.O))
         self.x_rec = np.append(self.x_rec, np.expand_dims(self.x[:, 0], axis=1), axis=1)
 
     def make_phi_w(self):
@@ -57,27 +57,30 @@ class chain_oscillator():
                     self.w[i, j] = 1
 
 
-class Hopper_CPG(chain_oscillator):
+class CPG_hopper(chain_oscillator):
     def __init__(self, mu, om, dp, dt=0.01, time=5, a=100):
         # defining CPG class attributes.
         super().__init__(mu, om, dp, dt, a)
-        self.exp_info = f"| CPG_Hopper | mu = {mu.T} | om = {om.T} | dp = {dp} |"
+        mu_round = [round(float(i), 1) for i in mu]
+        om_round = [round(float(i), 3) for i in om]
+        dp_round = [round(float(i), 3) for i in dp]
+        self.exp_info = f"CPG_Hopper Torques (Nm) | mu = {mu_round} | om ~ {om_round} | dp ~ {dp_round}"
         self.time = time
         self.steps = 0
 
-    def step(self):
+    def hop(self):
         # updating the CPG state for a new timestep.
         self.new_r()
         self.new_O()
         self.new_x()
         self.steps += 1
-        return
+        return self.x[:, 0]
 
-    def hop(self):
+    def hopping(self):
         # looping over timesteps of 0.001s to generate CPG oscillator behaviours for different CPG parameter values.
         t = 0
         while t < self.time:
-            self.step()
+            self.hop()
             t = self.steps * self.dt
             if t % 1 == 0:
                 print(f"time {t}")
@@ -103,18 +106,18 @@ class Hopper_CPG(chain_oscillator):
 
         # Plotting for the hip_joint
         axs[0].plot(times, hip_joint, 'tab:blue')
-        axs[0].set_title('Hip Joint Angles')
-        axs[0].set_ylabel('Angle (degrees)')
+        axs[0].set_title('Hip Joint')
+        axs[0].set_ylabel('Set Point')
 
         # Plotting for the knee_joint
         axs[1].plot(times, knee_joint, 'tab:orange')
-        axs[1].set_title('Knee Joint Angles')
-        axs[1].set_ylabel('Angle (degrees)')
+        axs[1].set_title('Knee Joint')
+        axs[1].set_ylabel('Set Point')
 
         # Plotting for the ankle_joint
         axs[2].plot(times, ankle_joint, 'tab:green')
-        axs[2].set_title('Ankle Joint Angles')
-        axs[2].set_ylabel('Angle (degrees)')
+        axs[2].set_title('Ankle Joint')
+        axs[2].set_ylabel('Set Point')
         axs[2].set_xlabel('Time (s)')
 
         # Adjust the layout to prevent overlap
@@ -122,7 +125,7 @@ class Hopper_CPG(chain_oscillator):
 
         # Figure scale details
         plt.suptitle(self.exp_info, fontsize=12)
-        plt.show()
+        plt.show(block=False)
 
 if __name__ == "__main__":
     # defining CPG parameters and running CPG oscillation, then plotting.
@@ -130,6 +133,6 @@ if __name__ == "__main__":
     om = 2 * m.pi * np.ones((3, 1))
     dp = m.pi * np.ones(2)
     dt = 0.01
-    hopper = Hopper_CPG(mu, om, dp, dt, time=20)
-    hopper.hop()
+    hopper = CPG_hopper(mu, om, dp, dt, time=20)
+    hopper.hopping()
     hopper.subplot_joints()

@@ -3,6 +3,10 @@ import cv2
 import wandb
 import os
 import argparse
+import math as m
+import numpy as np
+
+from CPG_hopper import CPG_hopper
 
 def video_playback_loop(video_path):
     while True:
@@ -33,6 +37,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run Hopper environment and log with Weights & Biases")
     parser.add_argument("--wandb", action="store_true", help="Enable logging to Weights & Biases")
     parser.add_argument("--visualize", action="store_true", help="Enable video playback in a popup window")
+    parser.add_argument("--plotCPG", action="store_true", help="Plot CPG oscillations for each joint")
     args = parser.parse_args()
 
     # Set up the Hopper environment
@@ -43,6 +48,7 @@ if __name__ == "__main__":
     else:
         print("rgb_array mode is NOT supported. Available modes:", supported_modes)
     t = 0
+    Ns = 0
     observation = env.reset()
 
     # Initialize Weights & Biases if the --wandb flag is provided
@@ -62,21 +68,29 @@ if __name__ == "__main__":
         if video_writer is None:
             frame = env.render()
             height, width, _ = frame.shape
-            video_writer = cv2.VideoWriter(video_path, fourcc, 50.0, (width, height))
+            video_writer = cv2.VideoWriter(video_path, fourcc, 125.0, (width, height))
             print("success making frame and video_writer!")
+
+    # defining CPG parameters and running CPG oscillation, then plotting.
+    mu = np.ones((3, 1))
+    om = 10 * 2 * m.pi * np.array([[0.5], [0.5], [2]])
+    dp = m.pi * np.ones(2)
+    dt = 0.008
+    hopper = CPG_hopper(mu, om, dp, dt)
 
     # Run one episode
     term = False
     trunc = False
     total_reward = 0
     while not (term or trunc):
-        action = env.action_space.sample()  # Replace with your own policy
-        if t != 0:
+        #action = env.action_space.sample()  # Replace with your own policy
+        action = hopper.hop()
+        if Ns != 0:
             obs = [round(float(i), 3) for i in observation[0:5]]
-        elif t == 0:
+        elif Ns == 0:
             obs = [round(float(i), 3) for i in observation[0][0:5]]
         act = [round(float(i), 3) for i in action]
-        print(f"obs_(t={t}): {obs}, action_(t={t}): {act}")
+        print(f"[Ns={Ns} | t={t:.3f}] obs: {obs}, action: {act}")
         observation, reward, term, trunc, info = env.step(action)
         # rewards
         if args.wandb:
@@ -87,9 +101,10 @@ if __name__ == "__main__":
         frame = env.render()
         video_writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
-        t += 1
+        Ns += 1
+        t = Ns * dt
 
-    print(f"obs_(t={t}): {obs}")
+    print(f"[Ns={Ns} | t={t:.3f}] obs: {obs}")
 
     # Release the video writer and close the environment
     video_writer.release()
@@ -100,11 +115,17 @@ if __name__ == "__main__":
         # Log the total reward to wandb
         wandb.log({'total_reward': total_reward})
 
-        # Upload the video to wandb
-        wandb.log({"hopper_episode": wandb.Video(video_path, fps=50, format="mp4")})
+        if args.visualize:
+            # Upload the video to wandb
+            wandb.log({"hopper_episode": wandb.Video(video_path, fps=125, format="mp4")})
 
         # Close the wandb run
         wandb.finish()
+
+    # plot CPG oscillations
+    if args.plotCPG:
+        hopper.time = t
+        hopper.subplot_joints()
 
     # Play back the video in a popup window on repeat
     if args.visualize:

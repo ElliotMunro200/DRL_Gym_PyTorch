@@ -105,7 +105,7 @@ class EnvTask:
             from envs.create_maze_env import create_maze_env
             env = EnvWithGoal(create_maze_env(self.args.env_id), self.args.env_id, self.args.max_ep_steps, eval=self.args.eval)
         else:
-            import gym
+            import gymnasium as gym
             env = gym.make(self.args.env_id)
         return env
 
