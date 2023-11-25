@@ -54,7 +54,7 @@ class TD3_Agent(nn.Module):
         obs_tensor = torch.from_numpy(obs).type(torch.float32)
         mean = self.TD3_ac.pi(obs_tensor).squeeze()
         noise = Normal(torch.tensor([0.0]), torch.tensor([1.0])).sample()
-        action = torch.clip(mean+noise*0.1, -1.0, 1.0).squeeze()
+        action = torch.clip(mean+noise*0.1, -self.act_limit, self.act_limit).squeeze()
         return action
 
     def action_select(self, obss):

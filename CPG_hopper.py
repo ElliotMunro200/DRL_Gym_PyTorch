@@ -1,6 +1,11 @@
 import math as m
 import numpy as np
 
+"""
+Defines a CPG oscillator class for the 1-leg, 3-joint Hopper agent: CPG_hopper.
+Parameters given are mu (r target), om (theta'), dp (phase couplings), dt (integration step size). 
+Has functionality for plotting CPG set points x = r * cos(theta).
+"""
 
 class chain_oscillator():
     def __init__(self, mu, om, dp, dt, a):
@@ -62,9 +67,9 @@ class CPG_hopper(chain_oscillator):
         # defining CPG class attributes.
         super().__init__(mu, om, dp, dt, a)
         mu_round = [round(float(i), 1) for i in mu]
-        om_round = [round(float(i), 3) for i in om]
-        dp_round = [round(float(i), 3) for i in dp]
-        self.exp_info = f"CPG_Hopper Torques (Nm) | mu = {mu_round} | om ~ {om_round} | dp ~ {dp_round}"
+        om_round = [round(float(i), 1) for i in om]
+        dp_round = [round(float(i), 1) for i in dp]
+        self.exp_info = f"CPG_Hopper Torques (Nm) | mu = {mu_round} | om ~ {om_round} | dp ~ {dp_round} | dt = {dt}"
         self.time = time
         self.steps = 0
 
@@ -93,7 +98,7 @@ class CPG_hopper(chain_oscillator):
                 self.dp += 1
                 self.make_phi_w()
 
-    def subplot_joints(self):
+    def subplot_joints(self, block):
         # plotting CPG oscillator behaviour.
         import matplotlib.pyplot as plt
 
@@ -125,7 +130,7 @@ class CPG_hopper(chain_oscillator):
 
         # Figure scale details
         plt.suptitle(self.exp_info, fontsize=12)
-        plt.show(block=False)
+        plt.show(block=block)
 
 if __name__ == "__main__":
     # defining CPG parameters and running CPG oscillation, then plotting.
@@ -135,4 +140,4 @@ if __name__ == "__main__":
     dt = 0.01
     hopper = CPG_hopper(mu, om, dp, dt, time=20)
     hopper.hopping()
-    hopper.subplot_joints()
+    hopper.subplot_joints(True)
