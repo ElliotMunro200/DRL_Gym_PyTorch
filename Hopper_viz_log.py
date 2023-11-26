@@ -42,6 +42,7 @@ def video_playback_loop(video_path):
 if __name__ == "__main__":
     # Set up argparse
     parser = argparse.ArgumentParser(description="Run Hopper environment and log with Weights & Biases")
+    parser.add_argument("-ns", "--num_steps", type=int, default=200000, help="number of global steps")
     parser.add_argument("-w", "--wandb", action="store_true", help="Enable logging to Weights & Biases")
     parser.add_argument("-v", "--visualize", action="store_true", help="Enable video playback in a popup window")
     parser.add_argument("-p", "--plotCPG", action="store_true", help="Plot CPG oscillations for each joint")
