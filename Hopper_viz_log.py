@@ -79,18 +79,18 @@ if __name__ == "__main__":
     act_dim = len(mu) + len(om) + len(dp)
     act_space = Box(low=-1.0, high=1.0, shape=(8,), dtype=np.float32)
     assert act_space.shape[0] == act_dim
-    act_limit = act_space.high
-    #hidden_sizes = [300, 300]
-    #activation = nn.ReLU
-    #NN = MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
-    argsTD3 = get_args() # TODO: make args work
-    TD3 = TD3_Agent(obs_space, act_space, act_limit, argsTD3) # TODO: init TD3
+    act_limit = int(act_space.high[0])
+    hidden_sizes = [300, 300]
+    activation = nn.ReLU
+    NN = MLPActor(obs_dim, act_dim, hidden_sizes, activation, act_limit)
+    #argsTD3 = get_args() # TODO: make args work
+    #TD3 = TD3_Agent(obs_space, act_space, act_limit, argsTD3) # TODO: init TD3
 
     # reinitializing CPG from NN
     obs = env.reset()[0]
-    #obs_tensor = torch.from_numpy(obs).type(torch.float32)
-    #cpg_params = NN(obs_tensor).detach().numpy() # TODO: change to TD3.action_from_obs()
-    cpg_params = TD3.action_select(obs)
+    obs_tensor = torch.from_numpy(obs).type(torch.float32)
+    cpg_params = NN(obs_tensor).detach().numpy() # TODO: change to TD3.action_from_obs()
+    #cpg_params = TD3.action_select(obs)
     hopper.mu = (np.expand_dims(cpg_params[0:3], axis=1) + 1) / 2
     hopper.om = (np.expand_dims(cpg_params[3:6], axis=1) + 1) * 10 * m.pi
     hopper.dp = cpg_params[6:8] * m.pi
@@ -109,9 +109,9 @@ if __name__ == "__main__":
         while not (term or trunc):
             # choose CPG parameters (with NN) here
 
-            #obs_tensor = torch.from_numpy(observation).type(torch.float32)
-            #cpg_params = NN(obs_tensor).detach().numpy() # TODO: change to TD3.action_from_obs()
-            cpg_params = TD3.action_from_obs(observation)
+            obs_tensor = torch.from_numpy(observation).type(torch.float32)
+            cpg_params = NN(obs_tensor).detach().numpy() # TODO: change to TD3.action_from_obs()
+            #cpg_params = TD3.action_from_obs(observation)
             hopper.mu = (np.expand_dims(cpg_params[0:3], axis=1) + 1) / 2
             hopper.om = (np.expand_dims(cpg_params[3:6], axis=1) + 1) * 10 * m.pi
             hopper.dp = cpg_params[6:8] * m.pi
@@ -126,11 +126,11 @@ if __name__ == "__main__":
 
             # env step
             observation, reward, term, trunc, info = env.step(action)
-            TD3.buffer.store(observation, action, reward, term) # TODO: change to TD3.buffer.store(...)
+            #TD3.buffer.store(observation, action, reward, term) # TODO: change to TD3.buffer.store(...)
 
-            if Ns % TD3.update_period == 0:
-                for _ in range(TD3.update_period):
-                    QLoss = TD3.update() # TODO: TD3.update()
+            #if Ns % TD3.update_period == 0:
+            #    for _ in range(TD3.update_period):
+            #        QLoss = TD3.update() # TODO: TD3.update()
 
             # increment episode rewards, step counts, and episode time (s).
             total_reward += reward
@@ -165,9 +165,9 @@ if __name__ == "__main__":
     # resetting CPG agent and episode variables before executing test episode.
     # reinitializing CPG from NN
     observation = env.reset()[0]
-    #obs_tensor = torch.from_numpy(observation).type(torch.float32)
-    #cpg_params = NN(obs_tensor).detach().numpy()
-    cpg_params = TD3.action_from_obs(observation) # TODO: change to TD3.action_from_obs()
+    obs_tensor = torch.from_numpy(observation).type(torch.float32)
+    cpg_params = NN(obs_tensor).detach().numpy()
+    #cpg_params = TD3.action_from_obs(observation) # TODO: change to TD3.action_from_obs()
     hopper.mu = (np.expand_dims(cpg_params[0:3], axis=1) + 1) / 2
     hopper.om = (np.expand_dims(cpg_params[3:6], axis=1) + 1) * 10 * m.pi
     hopper.dp = cpg_params[6:8] * m.pi
@@ -184,9 +184,9 @@ if __name__ == "__main__":
     while not (term or trunc):
 
         # CPG parameter selection from NN
-        #obs_tensor = torch.from_numpy(observation).type(torch.float32)
-        #cpg_params = NN(obs_tensor).detach().numpy()
-        cpg_params = TD3.action_from_obs(observation) # TODO: change to TD3.action_from_obs()
+        obs_tensor = torch.from_numpy(observation).type(torch.float32)
+        cpg_params = NN(obs_tensor).detach().numpy()
+        #cpg_params = TD3.action_from_obs(observation) # TODO: change to TD3.action_from_obs()
         hopper.mu = (np.expand_dims(cpg_params[0:3], axis=1) + 1) / 2
         hopper.om = (np.expand_dims(cpg_params[3:6], axis=1) + 1) * 10 * m.pi
         hopper.dp = cpg_params[6:8] * m.pi
