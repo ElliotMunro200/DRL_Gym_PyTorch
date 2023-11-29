@@ -8,7 +8,7 @@ import itertools
 import gymnasium as gym
 
 from gymnasium.spaces import Box
-from PG_base import MLPActorCritic_TD3, PG_OffPolicy_Buffer
+from PG_base import MLPActorCritic_TD3, PG_OffPolicy_Buffer, ReplayBuffer
 from utils import get_args, printing, plot, EnvTask
 
 
@@ -29,7 +29,8 @@ class TD3_Agent(nn.Module):
         # Buffer+Rewards lists
         self.batch_size = args.batch_size
         self.buffer_size = args.buffer_size
-        self.buffer = PG_OffPolicy_Buffer(self.obs_dim, self.act_dim, self.batch_size, self.buffer_size)
+        #self.buffer = PG_OffPolicy_Buffer(self.obs_dim, self.act_dim, self.batch_size, self.buffer_size)
+        self.buffer = ReplayBuffer(self.obs_dim, self.act_dim, self.buffer_size)
         self.total_rews_by_ep = []
         # Training params
         self.gamma = args.gamma
@@ -37,7 +38,7 @@ class TD3_Agent(nn.Module):
         self.act_noise = args.act_noise
         self.target_noise = args.target_noise
         self.noise_clip = args.noise_clip
-        self.warmup_period = args.training_first_ep_num * args.max_ep_steps
+        self.warmup_period = args.warmup_period
         self.update_period = args.update_period
         self.delayed_update_period = args.delayed_update_period
         self.MseLoss = nn.MSELoss()
@@ -89,7 +90,7 @@ class TD3_Agent(nn.Module):
         self.TD3_ac_target.pi.load_state_dict(PiTarget_weights)
 
     def update(self):
-        data = self.buffer.sample_batch()
+        data = self.buffer.sample_batch(self.batch_size)
         b_obs, b_acts, b_rews, b_terms, b_obs_2 = data['obs'], data['act'], data['rew'], data['term'], data['obs2']
 
         Q1 = self.TD3_ac.q1(b_obs, b_acts)
@@ -136,7 +137,7 @@ class TD3_Agent(nn.Module):
         return QLoss
 
     def after_episode(self):
-        bcs = self.buffer.curr_size
+        bcs = self.buffer.size
         ep_rews = self.buffer.rew_buf[(bcs-self.ep_t):bcs]
         ep_rew = sum(ep_rews)
         self.total_rews_by_ep.append(ep_rew)
@@ -144,31 +145,34 @@ class TD3_Agent(nn.Module):
         print(f"| Episode {self.ep:<3} done | Steps: {self.ep_t:<3} | Rewards: {ep_rew:<4.1f} | Last QLoss: {self.last_Q_loss:<4.1f} |")
         self.ep_t = 0
 
-    def step(self, obss, rews=0.0, terms=False, trunc=False):
+    def step(self, obss):
         acts = self.action_select(obss)
-        self.buffer.store(obss, acts, rews, terms)
         self.t += 1
         self.ep_t += 1
         # only update if buffer is big enough and time to update
-        if (self.buffer.curr_size >= self.warmup_period) and (self.t % self.update_period == 0):
+        if (self.t >= self.warmup_period) and (self.t % self.update_period == 0):
             # one update for each timestep since last updating
             for _ in range(self.update_period):
                 QLoss = self.update()
-        if (terms or trunc):
-            self.after_episode()
         return acts
 
 
 def train(args, env, agent):
-    action, env_t = agent.step(env.reset()[0]), 0
-    while agent.t < args.training_steps:
-        obss, rews, terms, truncs, _ = env.step(action)
-        if (terms or truncs):
-            obss, _ = env.reset()
-        env_t += 1
-        #print(f"env_t: {env_t}, agent.T: {agent.t}")
-        assert agent.t == env_t  # to remove
-        action = agent.step(obss, rews, terms, truncs)
+    obs = env.reset()[0]
+    for t in range(args.training_steps):
+        # agent.step
+        action = agent.step(obs)
+        # env.step
+        obs2, rew, term, trunc, _ = env.step(action)
+        # store transitions
+        agent.buffer.store(obs, action, rew, obs2, term)
+        # change obs
+        obs = obs2
+        # check if episode is done
+        if (term or trunc):
+            agent.after_episode()
+            obs = env.reset()[0]
+
     total_rews_by_ep = agent.total_rews_by_ep
     return total_rews_by_ep
 
